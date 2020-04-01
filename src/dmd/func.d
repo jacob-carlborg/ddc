@@ -303,6 +303,8 @@ extern (C++) class FuncDeclaration : Declaration
 
     uint flags;                        /// FUNCFLAG.xxxxx
 
+    bool delegate(Scope* scope_) canInferAttributesOverride;
+
     extern (D) this(const ref Loc loc, const ref Loc endloc, Identifier ident, StorageClass storage_class, Type type)
     {
         super(loc, ident);
@@ -1228,6 +1230,9 @@ extern (C++) class FuncDeclaration : Declaration
      */
     final bool canInferAttributes(Scope* sc)
     {
+        if (canInferAttributesOverride)
+            return canInferAttributesOverride(sc);
+
         if (!fbody)
             return false;
 
