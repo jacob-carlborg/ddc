@@ -1,4 +1,4 @@
-name "dmd"
+name "ddc"
 description "The DMD compiler"
 authors "Walter Bright"
 copyright "Copyright © 1999-2018, The D Language Foundation"
@@ -45,7 +45,7 @@ subPackage {
 
   stringImportPaths "generated/dub"
 
-  dependency "dmd:root" version="*"
+  dependency "ddc:root" version="*"
 }
 
 subPackage {
@@ -60,7 +60,7 @@ subPackage {
     "src/dmd/permissivevisitor.d" \
     "src/dmd/strictvisitor.d"
 
-  dependency "dmd:lexer" version="*"
+  dependency "ddc:lexer" version="*"
 }
 
 subPackage {
@@ -124,5 +124,5 @@ subPackage {
     toir\
   }.d"
 
-  dependency "dmd:parser" version="*"
+  dependency "ddc:parser" version="*"
 }
