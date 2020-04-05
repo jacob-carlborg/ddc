@@ -2290,6 +2290,7 @@ class Lexer
     final Loc loc() pure @nogc
     {
         scanloc.charnum = cast(uint)(1 + p - line);
+        scanloc.offset = cast(uint)(p - base);
         return scanloc;
     }
 

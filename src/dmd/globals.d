@@ -531,15 +531,29 @@ struct Loc
     const(char)* filename; // either absolute or relative to cwd
     uint linnum;
     uint charnum;
+    uint offset_;
 
     static immutable Loc initial;       /// use for default initialization of const ref Loc's
 
 nothrow:
-    extern (D) this(const(char)* filename, uint linnum, uint charnum) pure
+    extern (D) this(const(char)* filename, uint linnum, uint charnum, uint offset = 0) pure
     {
         this.linnum = linnum;
         this.charnum = charnum;
         this.filename = filename;
+        offset_ = offset;
+    }
+
+    uint offset() const pure @nogc @safe
+    {
+        pragma(inline, true);
+        return offset_;
+    }
+
+    package uint offset(uint value) pure @nogc @safe
+    {
+        pragma(inline, true);
+        return offset_ = value;
     }
 
     extern (C++) const(char)* toChars(
