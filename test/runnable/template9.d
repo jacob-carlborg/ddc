@@ -42,9 +42,9 @@ T = char
 
 RUN_OUTPUT:
 ---
-typeof(T)=
-typeof(T)=
-typeof(T)=
+typeof(T)=double typeof(S)=int
+typeof(T)=double typeof(S)=int
+typeof(T)=float typeof(S)=int
 Success
 ---
 */
@@ -123,19 +123,23 @@ void test4()
 
 /**********************************/
 
-import std.stdio:writefln;
-
 template foo5(T,S)
 {
     void foo5(T t, S s) {
-        writefln("typeof(T)=",typeid(T)," typeof(S)=",typeid(S));
+        const tstr = typeid(T).toString();
+        const sstr = typeid(S).toString();
+        printf("typeof(T)=%.*s typeof(S)=%.*s\n",
+               cast(int)tstr.length, tstr.ptr, cast(int)sstr.length, sstr.ptr);
     }
 }
 
 template bar5(T,S)
 {
     void bar5(S s) {
-        writefln("typeof(T)=",typeid(T),"typeof(S)=",typeid(S));
+        const tstr = typeid(T).toString();
+        const sstr = typeid(S).toString();
+        printf("typeof(T)=%.*s typeof(S)=%.*s\n",
+               cast(int)tstr.length, tstr.ptr, cast(int)sstr.length, sstr.ptr);
     }
 }
 
@@ -4524,6 +4528,7 @@ struct N14174 {}
 
 alias defConfig14174 = Config14174!(N14174, N14174);
 
+@safe @nogc pure nothrow
 void accepter14174a(Config : Config14174!(T) = defConfig14174, T...)()
 {
     static assert(equalDemangle(accepter14174a.mangleof,
@@ -4531,9 +4536,10 @@ void accepter14174a(Config : Config14174!(T) = defConfig14174, T...)()
            "accepter14174a"~
            "HTS7breaker51__T11Config14174TS7breaker6N14174TS7breaker6N14174Z11Config14174TS7breaker6N14174TS7breaker6N14174Z14"~
            "accepter14174a"~
-           "FZv"));
+           "FNaNbNiNfZv"));
 }
 
+@safe @nogc pure nothrow
 void accepter14174b(Config : Config14174!(T) = defConfig14174, T...)()
 {
     static assert(equalDemangle(accepter14174b.mangleof,
@@ -4541,13 +4547,14 @@ void accepter14174b(Config : Config14174!(T) = defConfig14174, T...)()
            "accepter14174b"~
            "HTS7breaker51__T11Config14174TS7breaker6N14174TS7breaker6N14174Z11Config14174TS7breaker6N14174TS7breaker6N14174Z14"~
            "accepter14174b"~
-           "FZv"));
+           "FNaNbNiNfZv"));
 }
 
 void test14174()
 {
-    accepter14174a!()(); // ok
-    accepter14174b();    // error
+    accepter14174a!()();
+
+    accepter14174b!()();
 }
 
 /******************************************/

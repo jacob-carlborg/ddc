@@ -1,6 +1,5 @@
 /**
- * Compiler implementation of the
- * $(LINK2 http://www.dlang.org, D programming language).
+ * Invoke the linker as a separate process.
  *
  * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
@@ -348,17 +347,17 @@ public int runLINK()
             {
                 if (i)
                     cmdbuf.writeByte('+');
-                const(char)* p = global.params.objfiles[i];
-                const(char)* basename = FileName.removeExt(FileName.name(p));
-                const(char)* ext = FileName.ext(p);
-                if (ext && !strchr(basename, '.'))
+                const(char)[] p = global.params.objfiles[i].toDString();
+                const(char)[] basename = FileName.removeExt(FileName.name(p));
+                const(char)[] ext = FileName.ext(p);
+                if (ext.length && !strchr(basename.ptr, '.'))
                 {
                     // Write name sans extension (but not if a double extension)
-                    writeFilename(&cmdbuf, p[0 .. ext - p - 1]);
+                    writeFilename(&cmdbuf, p[0 .. $ - ext.length - 1]);
                 }
                 else
                     writeFilename(&cmdbuf, p);
-                FileName.free(basename);
+                FileName.free(basename.ptr);
             }
             cmdbuf.writeByte(',');
             if (global.params.exefile)
@@ -611,20 +610,6 @@ public int runLINK()
              */
             argv.push("-Xlinker");
             argv.push("--gc-sections");
-        }
-
-        /**
-        Checks if C string `p` starts with `needle`.
-        Params:
-            p = the C string to check
-            needle = the string to look for
-        Returns
-            `true` if `p` starts with `needle`
-        */
-        static bool startsWith(const(char)* p, string needle)
-        {
-            const f = p.toDString();
-            return f.length >= needle.length && f[0 .. needle.length] == needle;
         }
 
         // return true if flagp should be ordered in with the library flags
@@ -918,7 +903,7 @@ version (Windows)
         const argv0 = global.params.argv0;
         //printf("argv0='%s', cmd='%s', args='%s'\n",argv0,cmd,args);
         // If cmd is fully qualified, we don't do this
-        if (FileName.absolute(cmd))
+        if (FileName.absolute(cmd.toDString()))
             return -1;
         const file = FileName.replaceName(argv0, cmd.toDString);
         //printf("spawning '%s'\n",file);
@@ -982,14 +967,15 @@ public int runProgram()
         childpid = fork();
         if (childpid == 0)
         {
-            const(char)* fn = argv[0];
+            const(char)[] fn = argv[0].toDString();
+            // Make it "./fn" if needed
             if (!FileName.absolute(fn))
-            {
-                // Make it "./fn"
                 fn = FileName.combine(".", fn);
-            }
-            execv(fn, argv.tdata());
-            perror(fn); // failed to execute
+            fn.toCStringThen!((fnp) {
+                    execv(fnp.ptr, argv.tdata());
+                    // If execv returns, it failed to execute
+                    perror(fnp.ptr);
+                });
             return -1;
         }
         waitpid(childpid, &status, 0);
@@ -1010,4 +996,3 @@ public int runProgram()
         assert(0);
     }
 }
-

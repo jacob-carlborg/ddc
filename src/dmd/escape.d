@@ -1,9 +1,6 @@
 /**
  * Most of the logic to implement scoped pointers and scoped references is here.
  *
- * Compiler implementation of the
- * $(LINK2 http://www.dlang.org, D programming language).
- *
  * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
@@ -1477,9 +1474,12 @@ void escapeByValue(Expression e, EscapeByResults* er, bool live = false)
 
         override void visit(VarExp e)
         {
-            VarDeclaration v = e.var.isVarDeclaration();
-            if (v)
-                er.byvalue.push(v);
+            if (auto v = e.var.isVarDeclaration())
+            {
+                if (v.type.hasPointers() || // not tracking non-pointers
+                    v.storage_class & STC.lazy_) // lazy variables are actually pointers
+                    er.byvalue.push(v);
+            }
         }
 
         override void visit(ThisExp e)

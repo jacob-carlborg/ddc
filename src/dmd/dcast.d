@@ -1,6 +1,5 @@
 /**
- * Compiler implementation of the
- * $(LINK2 http://www.dlang.org, D programming language).
+ * Semantic analysis for cast-expressions.
  *
  * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
@@ -583,7 +582,7 @@ MATCH implicitConvTo(Expression e, Type t)
 
             TY tyn = e.type.nextOf().ty;
 
-            if (!(tyn == Tchar || tyn == Twchar || tyn == Tdchar))
+            if (!tyn.isSomeChar)
                 return visit(cast(Expression)e);
 
             switch (t.ty)
@@ -600,7 +599,7 @@ MATCH implicitConvTo(Expression e, Type t)
                         }
                         return;
                     }
-                    if (tynto == Tchar || tynto == Twchar || tynto == Tdchar)
+                    if (tynto.isSomeChar)
                     {
                         if (e.committed && tynto != tyn)
                             return;
@@ -615,7 +614,7 @@ MATCH implicitConvTo(Expression e, Type t)
                             return;
                         }
                     }
-                    if (!e.committed && (tynto == Tchar || tynto == Twchar || tynto == Tdchar))
+                    if (!e.committed && tynto.isSomeChar)
                     {
                         result = MATCH.exact;
                         return;
@@ -624,7 +623,7 @@ MATCH implicitConvTo(Expression e, Type t)
                 else if (e.type.ty == Tarray)
                 {
                     TY tynto = t.nextOf().ty;
-                    if (tynto == Tchar || tynto == Twchar || tynto == Tdchar)
+                    if (tynto.isSomeChar)
                     {
                         if (e.committed && tynto != tyn)
                             return;
@@ -644,7 +643,7 @@ MATCH implicitConvTo(Expression e, Type t)
                         result = MATCH.exact;
                         return;
                     }
-                    if (!e.committed && (tynto == Tchar || tynto == Twchar || tynto == Tdchar))
+                    if (!e.committed && tynto.isSomeChar)
                     {
                         result = MATCH.exact;
                         return;
@@ -2787,10 +2786,10 @@ bool typeMerge(Scope* sc, TOK op, Type* pt, Expression* pe1, Expression* pe2)
 
     if (op != TOK.question || t1b.ty != t2b.ty && (t1b.isTypeBasic() && t2b.isTypeBasic()))
     {
-        if (op == TOK.question && t1b.ischar() && t2b.ischar())
+        if (op == TOK.question && t1b.ty.isSomeChar() && t2b.ty.isSomeChar())
         {
-            e1 = charPromotions(e1, sc);
-            e2 = charPromotions(e2, sc);
+            e1 = e1.castTo(sc, Type.tdchar);
+            e2 = e2.castTo(sc, Type.tdchar);
         }
         else
         {
@@ -3484,29 +3483,6 @@ Expression integralPromotions(Expression e, Scope* sc)
 
     default:
         break;
-    }
-    return e;
-}
-
-/***********************************
- * Do char promotions.
- *   char  -> dchar
- *   wchar -> dchar
- *   dchar -> dchar
- */
-Expression charPromotions(Expression e, Scope* sc)
-{
-    //printf("charPromotions %s %s\n", e.toChars(), e.type.toChars());
-    switch (e.type.toBasetype().ty)
-    {
-    case Tchar:
-    case Twchar:
-    case Tdchar:
-        e = e.castTo(sc, Type.tdchar);
-        break;
-
-    default:
-        assert(0);
     }
     return e;
 }

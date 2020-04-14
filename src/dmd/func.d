@@ -1,6 +1,12 @@
-/***
- * Compiler implementation of the
- * $(LINK2 http://www.dlang.org, D programming language).
+/**
+ * Defines a function declaration.
+ *
+ * Includes:
+ * - function/delegate literals
+ * - function aliases
+ * - (static/shared) constructors/destructors/post-blits
+ * - `invariant`
+ * - `unittest`
  *
  * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
@@ -2468,19 +2474,15 @@ extern (C++) class FuncDeclaration : Declaration
             return true;
 
         auto tf = type.toTypeFunction();
+        if (tf.isref)
+            return true;
 
         foreach (rs; *returns)
         {
-            if (rs.exp.op == TOK.variable)
+            if (auto ve = rs.exp.isVarExp())
             {
-                auto ve = cast(VarExp)rs.exp;
                 auto v = ve.var.isVarDeclaration();
-                if (tf.isref)
-                {
-                    // Function returns a reference
-                    return true;
-                }
-                else if (!v || v.isOut() || v.isRef())
+                if (!v || v.isOut() || v.isRef())
                     return true;
                 else if (nrvo_var is null)
                 {

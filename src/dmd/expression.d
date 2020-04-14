@@ -1,6 +1,7 @@
 /**
- * Compiler implementation of the
- * $(LINK2 http://www.dlang.org, D programming language).
+ * Defines the bulk of the classes which represent the AST at the expression level.
+ *
+ * Specification: ($LINK2 https://dlang.org/spec/expression.html, Expressions)
  *
  * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
@@ -693,7 +694,9 @@ extern (C++) abstract class Expression : ASTNode
             }
             assert(0);
         }
-        e = cast(Expression)mem.xmalloc(size);
+
+        // memory never freed, so can use the faster bump-pointer-allocation
+        e = cast(Expression)_d_allocmemory(size);
         //printf("Expression::copy(op = %d) e = %p\n", op, e);
         return cast(Expression)memcpy(cast(void*)e, cast(void*)this, size);
     }
@@ -2897,8 +2900,7 @@ extern (C++) final class ArrayLiteralExp : Expression
     override StringExp toStringExp()
     {
         TY telem = type.nextOf().toBasetype().ty;
-        if (telem == Tchar || telem == Twchar || telem == Tdchar ||
-            (telem == Tvoid && (!elements || elements.dim == 0)))
+        if (telem.isSomeChar || (telem == Tvoid && (!elements || elements.dim == 0)))
         {
             ubyte sz = 1;
             if (telem == Twchar)

@@ -1,6 +1,4 @@
 /**
- * Compiler implementation of the
- * $(LINK2 http://www.dlang.org, D programming language).
  * Entry point for DMD.
  *
  * This modules defines the entry point (main) for DMD, as well as related
@@ -1455,24 +1453,6 @@ bool parseCommandLine(const ref Strings arguments, const size_t argc, ref Param 
         return (overflow || value > max || *p) ? uint.max : value;
     }
 
-    /********************************
-     * Params:
-     *  p = 0 terminated string
-     *  s = string
-     * Returns:
-     *  true if `p` starts with `s`
-     */
-    static pure bool startsWith(const(char)* p, string s)
-    {
-        foreach (const c; s)
-        {
-            if (c != *p)
-                return false;
-            ++p;
-        }
-        return true;
-    }
-
     /**
      * Print an error messsage about an invalid switch.
      * If an optional supplemental message has been provided,
@@ -2455,7 +2435,7 @@ bool parseCommandLine(const ref Strings arguments, const size_t argc, ref Param 
             size_t length = argc - i - 1;
             if (length)
             {
-                const(char)* ext = FileName.ext(arguments[i + 1]);
+                const(char)[] ext = FileName.ext(arguments[i + 1].toDString());
                 if (ext && FileName.equals(ext, "d") == 0 && FileName.equals(ext, "di") == 0)
                 {
                     error("-run must be followed by a source file, not '%s'", arguments[i + 1]);

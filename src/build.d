@@ -170,6 +170,8 @@ Command-line parameters
         log("================================================================================");
         foreach (key, value; env)
             log("%s=%s", key, value);
+        foreach (key, value; flags)
+            log("%s=%-(%s %)", key, value);
         log("================================================================================");
     }
     {
@@ -260,17 +262,20 @@ alias autoTesterBuild = makeRule!((builder, rule) {
 });
 
 /// Returns: the rule that builds the lexer object file
-alias lexer = makeRule!((builder, rule) => builder
+alias lexer = makeRuleWithArgs!((MethodInitializer!BuildRule builder, BuildRule rule,
+                                 string suffix, string[] extraFlags)
+    => builder
     .name("lexer")
-    .target(env["G"].buildPath("lexer").objName)
+    .target(env["G"].buildPath("lexer" ~ suffix).objName)
     .sources(sources.lexer)
     .deps([versionFile, sysconfDirFile])
-    .msg("(DC) LEXER_OBJ")
+    .msg("(DC) LEXER" ~ suffix)
     .command([env["HOST_DMD_RUN"],
         "-c",
         "-of" ~ rule.target,
         "-vtls"]
         .chain(flags["DFLAGS"],
+            extraFlags,
             // source files need to have relative paths in order for the code coverage
             // .lst files to be named properly for CodeCov to find them
             rule.sources.map!(e => e.relativePath(srcDir))
@@ -324,17 +329,18 @@ DFLAGS=-I%@P%/../../../../../druntime/import -I%@P%/../../../../../phobos -L-L%@
 });
 
 /// Returns: the rule that builds the backend object file
-alias backend = makeRule!((builder, rule) => builder
+alias backend = makeRuleWithArgs!((MethodInitializer!BuildRule builder, BuildRule rule,
+                                   string suffix, string[] extraFlags) => builder
     .name("backend")
-    .target(env["G"].buildPath("backend").objName)
+    .target(env["G"].buildPath("backend" ~ suffix).objName)
     .sources(sources.backend)
-    .msg("(DC) BACKEND_OBJ")
+    .msg("(DC) BACKEND" ~ suffix)
     .command([
         env["HOST_DMD_RUN"],
         "-c",
         "-of" ~ rule.target,
         "-betterC"]
-        .chain(flags["DFLAGS"], rule.sources).array)
+        .chain(flags["DFLAGS"], extraFlags, rule.sources).array)
 );
 
 /// Returns: the rules that generate required string files: VERSION and SYSCONFDIR.imp
@@ -384,13 +390,16 @@ BuildRule for the DMD executable.
 Params:
   extra_flags = Flags to apply to the main build but not the rules
 */
-alias dmdExe = makeRuleWithArgs!((MethodInitializer!BuildRule builder, BuildRule rule, string targetSuffix, string[] extraFlags) {
+alias dmdExe = makeRuleWithArgs!((MethodInitializer!BuildRule builder, BuildRule rule,
+                                  string targetSuffix, string[] extraFlags, string[] depFlags) {
     const dmdSources = sources.dmd.all.chain(sources.root).array;
 
     string[] platformArgs;
     version (Windows)
         platformArgs = ["-L/STACK:8388608"];
 
+    auto lexer = lexer(targetSuffix, depFlags);
+    auto backend = backend(targetSuffix, depFlags);
     builder
         // include lexer.o and backend.o
         .sources(dmdSources.chain(lexer.targets, backend.targets).array)
@@ -412,12 +421,12 @@ alias dmdExe = makeRuleWithArgs!((MethodInitializer!BuildRule builder, BuildRule
 alias dmdDefault = makeRule!((builder, rule) => builder
     .name("dmd")
     .description("Build dmd")
-    .deps([dmdExe(null, null), dmdConf])
+    .deps([dmdExe(null, null, null), dmdConf])
 );
 
 /// BuildRule to run the DMD unittest executable.
 alias runDmdUnittest = makeRule!((builder, rule) {
-    auto dmdUnittestExe = dmdExe("-unittest", ["-version=NoMain", "-unittest", "-main"]);
+auto dmdUnittestExe = dmdExe("-unittest", ["-version=NoMain", "-unittest", "-main"], ["-unittest"]);
     builder
         .name("unittest")
         .description("Run the dmd unittests")
@@ -445,7 +454,7 @@ alias runCxxUnittest = makeRule!((runCxxBuilder, runCxxRule) {
         .name("cxx-unittest")
         .description("Build the C++ unittests")
         .msg("(DMD) CXX-UNITTEST")
-        .deps([lexer, backend, cxxFrontend])
+        .deps([lexer(null, null), backend(null, null), cxxFrontend])
         .sources(sources.dmd.all ~ sources.root)
         .target(env["G"].buildPath("cxx-unittest").exeName)
         .command([ env["HOST_DMD_RUN"], "-of=" ~ exeRule.target, "-vtls", "-J" ~ env["RES"],
@@ -516,21 +525,13 @@ alias style = makeRule!((builder, rule)
         .msg("(GIT) DScanner")
         .target(dscannerDir)
         .condition(() => !exists(dscannerDir))
-        // .command([
-        //     // FIXME: Omitted --shallow-submodules because  it errors for libdparse
-        //     env["GIT"], "clone", "--depth=1", "--recurse-submodules", "--branch=v0.8.0",
-        //     "https://github.com/dlang-community/Dscanner", dscannerDir
-        // ])
-        .commandFunction(()
-        {
-            const git = env["GIT"];
-            run([git, "clone", "--depth=15", "--recurse-submodules", "--branch=v0.8.0",
-                "https://github.com/dlang-community/Dscanner", dscannerDir]);
-
-            // TODO: Remove this temporary fix for the invalid error messages in
-            // backend/ptrtab.d when D-Scanner upgrades DParse
-            run([git, "-C", dscannerDir.buildPath("libdparse"), "checkout", "63559db5cc6fa38c01bdda36e09638b5f20fb8e5"]);
-        })
+        .command([
+            // FIXME: Omitted --shallow-submodules because it requires a more recent
+            //        git version which is not available on buildkite
+            env["GIT"], "clone", "--depth=1", "--recurse-submodules",
+            "--branch=v0.9.0-beta.1",
+            "https://github.com/dlang-community/Dscanner", dscannerDir
+        ])
     );
 
     alias dscanner = methodInit!(BuildRule, (dscannerBuilder, dscannerRule) {
@@ -799,8 +800,9 @@ LtargetsLoop:
         switch (t)
         {
             case "all":
-                t = "dmd";
-                goto default;
+                // "all" must include dmd + dmd.conf
+                newTargets ~= dmdDefault;
+                break;
 
             default:
                 // check this last, target paths should be checked after predefined names
@@ -857,28 +859,8 @@ void parseEnvironment()
         verbose = "1" == env.getDefault("VERBOSE", null);
 
     // This block is temporary until we can remove the windows make files
-    {
-        const ddebug = env.get("DDEBUG", null);
-        if (ddebug.length)
-        {
-            writefln("WARNING: the DDEBUG variable is deprecated");
-            if (ddebug == "-debug -g -unittest -cov")
-            {
-                environment["ENABLE_DEBUG"] = "1";
-                environment["ENABLE_UNITTEST"] = "1";
-                environment["ENABLE_COVERAGE"] = "1";
-            }
-            else if (ddebug == "-debug -g -unittest")
-            {
-                environment["ENABLE_DEBUG"] = "1";
-                environment["ENABLE_UNITTEST"] = "1";
-            }
-            else
-            {
-                abortBuild("DDEBUG is not an expected value: " ~ ddebug);
-            }
-        }
-    }
+    if ("DDEBUG" in environment)
+        abortBuild("ERROR: the DDEBUG variable is deprecated!");
 
     version (Windows)
     {
@@ -1060,7 +1042,7 @@ void processEnvironment()
     }
     if (env.getNumberedBool("ENABLE_UNITTEST"))
     {
-        dflags ~= ["-unittest", "-cov"];
+        dflags ~= ["-unittest"];
     }
     if (env.getNumberedBool("ENABLE_PROFILE"))
     {
@@ -1068,7 +1050,7 @@ void processEnvironment()
     }
     if (env.getNumberedBool("ENABLE_COVERAGE"))
     {
-        dflags ~= ["-cov", "-L-lgcov"];
+        dflags ~= ["-cov"];
     }
     if (env.getDefault("ENABLE_SANITIZERS", "") != "")
     {
@@ -1172,7 +1154,7 @@ auto sourceFiles()
     }
     DmdSources dmd = {
         glue: fileArray(env["D"], "
-            irstate.d toctype.d glue.d gluelayer.d todt.d tocsym.d toir.d dmsc.d
+            stmtstate.d toctype.d glue.d gluelayer.d todt.d tocsym.d toir.d dmsc.d
             tocvdebug.d s2ir.d toobj.d e2ir.d eh.d iasm.d iasmdmd.d iasmgcc.d objc_glue.d
         "),
         frontend: fileArray(env["D"], "
@@ -1426,17 +1408,22 @@ void args2Environment(ref string[] args)
 }
 
 /**
-Checks whether the environment already contains a value for key and if so, sets
-the found value to the new environment object.
-Otherwise uses the `default_` value as fallback.
+Ensures that env contains a mapping for key and returns the associated value.
+Searches the process environment if it is missing and creates an appropriate
+entry in env using either the found value or `default_` as a fallback.
 
 Params:
     env = environment to write the check to
     key = key to check for existence and write into the new env
     default_ = fallback value if the key doesn't exist in the global environment
+
+Returns: the value associated to key
 */
 auto getDefault(ref string[string] env, string key, string default_)
 {
+    if (auto ex = key in env)
+        return *ex;
+
     if (key in environment)
         env[key] = environment[key];
     else

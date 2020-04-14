@@ -1,6 +1,7 @@
 /**
- * Compiler implementation of the
- * $(LINK2 http://www.dlang.org, D programming language).
+ * Semantic analysis of expressions.
+ *
+ * Specification: ($LINK2 https://dlang.org/spec/expression.html, Expressions)
  *
  * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
@@ -117,7 +118,7 @@ bool expressionsToString(ref OutBuffer buf, Scope* sc, Expressions* exps)
         // because in most contexts we don't want the conversion to succeed.
         IntegerExp ie = e4.isIntegerExp();
         const ty = (ie && ie.type) ? ie.type.ty : Terror;
-        if (ty == Tchar || ty == Twchar || ty == Tdchar)
+        if (ty.isSomeChar)
         {
             auto tsa = new TypeSArray(ie.type, new IntegerExp(1));
             e4 = new ArrayLiteralExp(ex.loc, tsa, ie);
@@ -10930,8 +10931,7 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
         {
             Type t1n = t1.nextOf().toBasetype();
             Type t2n = t2.nextOf().toBasetype();
-            if (((t1n.ty == Tchar || t1n.ty == Twchar || t1n.ty == Tdchar) &&
-                 (t2n.ty == Tchar || t2n.ty == Twchar || t2n.ty == Tdchar)) ||
+            if ((t1n.ty.isSomeChar && t2n.ty.isSomeChar) ||
                 (t1n.ty == Tvoid || t2n.ty == Tvoid))
             {
                 return false;
@@ -11398,6 +11398,12 @@ Expression semanticX(DotIdExp exp, Scope* sc)
                 {
                     if (f.checkForwardRef(exp.loc))
                     {
+                        return new ErrorExp();
+                    }
+                    if (f.flags & (FUNCFLAG.purityInprocess | FUNCFLAG.safetyInprocess |
+                                   FUNCFLAG.nothrowInprocess | FUNCFLAG.nogcInprocess))
+                    {
+                        f.error(exp.loc, "cannot retrieve its `.mangleof` while inferring attributes");
                         return new ErrorExp();
                     }
                 }

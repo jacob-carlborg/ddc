@@ -1,6 +1,5 @@
 /**
- * Compiler implementation of the
- * $(LINK2 http://www.dlang.org, D programming language).
+ * A library in the COFF format, used on 32-bit and 64-bit Windows targets.
  *
  * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
@@ -137,8 +136,6 @@ final class LibMSCoff : Library
             char* longnames = null;
             size_t longnames_length = 0;
             size_t offset = 8;
-            char* symtab = null;
-            uint symtab_size = 0;
             size_t mstart = objmodules.dim;
             while (1)
             {

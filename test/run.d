@@ -45,13 +45,11 @@ immutable slowRunnableTests = [
     "test42.d",
     "test17072.d",
     "testgc3.d",
-    "testformat.d",
     "link2644.d",
     "link13415.d",
     "link14558.d",
     "hospital.d",
     "interpret.d",
-    "testsignals.d",
     "xtest46.d",
 ];
 
@@ -118,7 +116,7 @@ Options:
         return 0;
     }
 
-    defaultPoolThreads = jobs;
+    defaultPoolThreads = jobs - 1; // main thread executes tasks as well
 
     // parse arguments
     args.popFront;

@@ -46,13 +46,18 @@ private alias requiredEnvVars = AliasSeq!(
     "EXE", "OBJ",
     "DMD", "DFLAGS",
     "OS", "SEP", "DSEP",
+    "BUILD"
+);
+private alias optionalEnvVars = AliasSeq!(
+    "CC",
 );
 private alias allVars = AliasSeq!(
     requiredEnvVars,
+    optionalEnvVars,
     "TEST_DIR", "TEST_NAME",
     "RESULTS_TEST_DIR",
     "OUTPUT_BASE", "EXTRA_FILES",
-    "LIBEXT",
+    "LIBEXT"
 );
 
 static foreach (var; allVars)
@@ -63,9 +68,14 @@ static foreach (var; allVars)
 /// called from the dshell module to initialize environment
 void dshellPrebuiltInit(string testDir, string testName)
 {
-    static foreach (var; requiredEnvVars)
+    foreach (var; requiredEnvVars)
     {
-        mixin(`Vars.set("` ~ var ~ `", requireEnv("` ~ var ~ `"));`);
+        Vars.set(var, requireEnv(var));
+    }
+
+    foreach (var; optionalEnvVars)
+    {
+        Vars.set(var, environment.get(var, ""));
     }
 
     Vars.set("TEST_DIR", testDir);
@@ -96,6 +106,9 @@ private string requireEnv(string name)
     }
     return result;
 }
+
+/// Exit code to return if the test is disabled for the current platform
+enum DISABLED = 125;
 
 /// Remove one or more files
 void rm(scope const(char[])[] args...)
