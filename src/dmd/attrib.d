@@ -442,6 +442,13 @@ extern (C++) final class CPPMangleDeclaration : AttribDeclaration
             sc.aligndecl, sc.inlining);
     }
 
+    override void setScope(Scope* sc)
+    {
+        if (decl)
+            Dsymbol.setScope(sc); // for forward reference
+        return AttribDeclaration.setScope(sc);
+    }
+
     override const(char)* toChars() const
     {
         return toString().ptr;
@@ -845,6 +852,18 @@ extern (C++) final class PragmaDeclaration : AttribDeclaration
                     inlining = PINLINE.never;
             }
             return createNewScope(sc, sc.stc, sc.linkage, sc.cppmangle, sc.protection, sc.explicitProtection, sc.aligndecl, inlining);
+        }
+        if (ident == Id.printf || ident == Id.scanf)
+        {
+            auto sc2 = sc.push();
+
+            if (ident == Id.printf)
+                // Override previous setting, never let both be set
+                sc2.flags = (sc2.flags & ~SCOPE.scanf) | SCOPE.printf;
+            else
+                sc2.flags = (sc2.flags & ~SCOPE.printf) | SCOPE.scanf;
+
+            return sc2;
         }
         return sc;
     }

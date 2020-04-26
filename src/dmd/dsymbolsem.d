@@ -1408,7 +1408,8 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
                         {
                             // or a delegate that doesn't escape a reference to the function
                             FuncDeclaration f = (cast(FuncExp)ex).fd;
-                            f.tookAddressOf--;
+                            if (f.tookAddressOf)
+                                f.tookAddressOf--;
                         }
                     }
                 }
@@ -1590,20 +1591,16 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
             // if inside a template instantiation, the instantianting
             // module gets the import.
             // https://issues.dlang.org/show_bug.cgi?id=17181
+            Module importer = sc._module;
             if (sc.minst && sc.tinst)
             {
-                //printf("%s imports %s\n", sc.minst.toChars(), imp.mod.toChars());
+                importer = sc.minst;
                 if (!sc.tinst.importedModules.contains(imp.mod))
                     sc.tinst.importedModules.push(imp.mod);
-                if (!sc.minst.aimports.contains(imp.mod))
-                    sc.minst.aimports.push(imp.mod);
             }
-            else
-            {
-                //printf("%s imports %s\n", sc._module.toChars(), imp.mod.toChars());
-                if (!sc._module.aimports.contains(imp.mod))
-                    sc._module.aimports.push(imp.mod);
-            }
+            //printf("%s imports %s\n", importer.toChars(), imp.mod.toChars());
+            if (!importer.aimports.contains(imp.mod))
+                importer.aimports.push(imp.mod);
 
             if (sc.explicitProtection)
                 imp.protection = sc.protection;
@@ -1655,8 +1652,8 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
 
             if (imp.mod.needmoduleinfo)
             {
-                //printf("module4 %s because of %s\n", sc.module.toChars(), mod.toChars());
-                sc._module.needmoduleinfo = 1;
+                //printf("module4 %s because of %s\n", importer.toChars(), imp.mod.toChars());
+                importer.needmoduleinfo = 1;
             }
 
             sc = sc.push(imp.mod);
@@ -2008,6 +2005,8 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
         }
         else if (pd.ident == Id.printf || pd.ident == Id.scanf)
         {
+            if (pd.args && pd.args.dim != 0)
+                pd.error("takes no argument");
             goto Ldecl;
         }
         else if (global.params.ignoreUnsupportedPragmas)
@@ -3480,6 +3479,62 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
             }
         }
 
+        if (const pors = sc.flags & (SCOPE.printf | SCOPE.scanf))
+        {
+            /* printf/scanf-like functions must be of the form:
+             *    extern (C/C++) T printf([parameters...], const(char)* format, ...);
+             * or:
+             *    extern (C/C++) T vprintf([parameters...], const(char)* format, va_list);
+             */
+
+            static bool isPointerToChar(Parameter p)
+            {
+                if (auto tptr = p.type.isTypePointer())
+                {
+                    return tptr.next.ty == Tchar;
+                }
+                return false;
+            }
+
+            static bool isVa_list(Parameter p)
+            {
+                // What it's actually pointing to depends on the target
+                return p.type.isTypePointer() !is null;
+            }
+
+            const nparams = f.parameterList.length;
+            if ((f.linkage == LINK.c || f.linkage == LINK.cpp) &&
+
+                (f.parameterList.varargs == VarArg.variadic &&
+                 nparams >= 1 &&
+                 isPointerToChar(f.parameterList[nparams - 1]) ||
+
+                 f.parameterList.varargs == VarArg.none &&
+                 nparams >= 2 &&
+                 isPointerToChar(f.parameterList[nparams - 2]) &&
+                 isVa_list(f.parameterList[nparams - 1])
+                )
+               )
+            {
+                funcdecl.flags |= (pors == SCOPE.printf) ? FUNCFLAG.printf : FUNCFLAG.scanf;
+            }
+            else
+            {
+                const p = (pors == SCOPE.printf ? Id.printf : Id.scanf).toChars();
+                if (f.parameterList.varargs == VarArg.variadic)
+                {
+                    funcdecl.error("`pragma(%s)` functions must be `extern(C) %s %s([parameters...], const(char)*, ...)"
+                                   ~ " not `%s`",
+                        p, f.next.toChars(), funcdecl.toChars(), funcdecl.type.toChars());
+                }
+                else
+                {
+                    funcdecl.error("`pragma(%s)` functions must be `extern(C) %s %s([parameters...], const(char)*, va_list)",
+                        p, f.next.toChars(), funcdecl.toChars());
+                }
+            }
+        }
+
         id = parent.isInterfaceDeclaration();
         if (id)
         {
@@ -4643,6 +4698,7 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
             if (sc.linkage == LINK.cpp)
                 sd.classKind = ClassKind.cpp;
             sd.cppnamespace = sc.namespace;
+            sd.cppmangle = sc.cppmangle;
         }
         else if (sd.symtab && !scx)
             return;
@@ -4861,6 +4917,7 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
             if (sc.linkage == LINK.cpp)
                 cldec.classKind = ClassKind.cpp;
             cldec.cppnamespace = sc.namespace;
+            cldec.cppmangle = sc.cppmangle;
             if (sc.linkage == LINK.objc)
                 objc.setObjc(cldec);
         }
@@ -6343,9 +6400,10 @@ void aliasSemantic(AliasDeclaration ds, Scope* sc)
     //printf("AliasDeclaration::semantic() %s\n", ds.toChars());
 
     // TypeTraits needs to know if it's located in an AliasDeclaration
+    const oldflags = sc.flags;
     sc.flags |= SCOPE.alias_;
     scope(exit)
-        sc.flags &= ~SCOPE.alias_;
+        sc.flags = oldflags;
 
     // preserve the original type
     if (!ds.originalType && ds.type)
