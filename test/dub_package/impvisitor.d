@@ -111,6 +111,7 @@ void main()
         scope p = new Parser!ASTBase(m, input, false);
         p.nextToken();
         m.members = p.parseModule();
+        p.reportDiagnostics();
         //writeln("Finished parsing. Starting transitive visitor");
 
         scope vis = new ImportVisitor2!ASTBase();

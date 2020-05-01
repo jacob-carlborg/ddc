@@ -5254,9 +5254,12 @@ private void highlightCode3(Scope* sc, ref OutBuffer buf, const(char)* p, const(
  */
 private void highlightCode2(Scope* sc, Dsymbols* a, ref OutBuffer buf, size_t offset)
 {
+    import dmd.diagnostic : DefaultDiagnosticHandler;
+
     uint errorsave = global.startGagging();
 
-    scope Lexer lex = new Lexer(null, cast(char*)buf[].ptr, 0, buf.length - 1, 0, 1);
+    DefaultDiagnosticHandler diagnosticHandler;
+    scope Lexer lex = new Lexer(null, cast(char*)buf[].ptr, 0, buf.length - 1, 0, 1, diagnosticHandler.diagnosticHandler);
     OutBuffer res;
     const(char)* lastp = cast(char*)buf[].ptr;
     //printf("highlightCode2('%.*s')\n", cast(int)(buf.length - 1), buf[].ptr);
@@ -5265,6 +5268,7 @@ private void highlightCode2(Scope* sc, Dsymbols* a, ref OutBuffer buf, size_t of
     {
         Token tok;
         lex.scan(&tok);
+        diagnosticHandler.report();
         highlightCode3(sc, res, lastp, tok.ptr);
         string highlight = null;
         switch (tok.value)

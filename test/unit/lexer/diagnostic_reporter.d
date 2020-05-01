@@ -2,6 +2,7 @@ module lexer.diagnostic_reporter;
 
 import core.stdc.stdarg;
 
+import dmd.diagnostic : CollectingDiagnosticHandler, DiagnosticHandler, Severity;
 import dmd.globals : Loc, global, DiagnosticReporting;
 
 import support : afterEach, NoopDiagnosticReporter;
@@ -15,50 +16,60 @@ import support : afterEach, NoopDiagnosticReporter;
 @("errors: unterminated /* */ comment")
 unittest
 {
-    static final class ErrorCountingDiagnosticReporter : NoopDiagnosticReporter
+    static struct ErrorCountingDiagnosticHandler
     {
         int errorCount;
 
-        override bool error(const ref Loc, const(char)*, va_list, const(char)*, const(char)*)
+        void handleDiagnostic(
+            const ref Loc loc, Severity severity,
+            scope const char* messageFormat,
+            va_list args,
+            bool isSupplemental = false
+        ) pure nothrow
         {
-            errorCount++;
-            return true;
+            if (severity == Severity.error)
+                errorCount++;
         }
     }
 
-    scope reporter = new ErrorCountingDiagnosticReporter;
-    lexUntilEndOfFile("/*");
+    auto handler = ErrorCountingDiagnosticHandler();
+    lexUntilEndOfFile("/*", &handler.handleDiagnostic);
 
-    assert(reporter.errorCount == 1);
+    assert(handler.errorCount == 1);
 }
 
 @("warnings: C preprocessor directive")
 unittest
 {
-    static final class WarningCountingDiagnosticReporter : NoopDiagnosticReporter
+    static struct WarningCountingDiagnosticHandler
     {
         int warningCount;
 
-        override bool warning(const ref Loc, const(char)*, va_list, const(char)*, const(char)*)
+        void handleDiagnostic(
+            const ref Loc loc, Severity severity,
+            scope const char* messageFormat,
+            va_list args,
+            bool isSupplemental = false
+        ) pure nothrow
         {
-            warningCount++;
-            return true;
+            if (severity == Severity.warning)
+                warningCount++;
         }
     }
 
     global.params.warnings = DiagnosticReporting.inform;
-    scope reporter = new WarningCountingDiagnosticReporter;
-    lexUntilEndOfFile(`#foo`);
+    auto handler = WarningCountingDiagnosticHandler();
+    lexUntilEndOfFile(`#foo`, &handler.handleDiagnostic);
 
-    assert(reporter.warningCount == 1);
+    assert(handler.warningCount == 1);
 }
 
-private void lexUntilEndOfFile(string code)
+private void lexUntilEndOfFile(string code, DiagnosticHandler diagnosticHandler)
 {
     import dmd.lexer : Lexer;
     import dmd.tokens : TOK;
 
-    scope lexer = new Lexer("test", code.ptr, 0, code.length, 0, 0);
+    scope lexer = new Lexer("test", code.ptr, 0, code.length, 0, 0, diagnosticHandler);
     lexer.nextToken;
 
     while (lexer.nextToken != TOK.endOfFile) {}

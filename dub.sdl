@@ -4,8 +4,9 @@ authors "Walter Bright"
 copyright "Copyright © 1999-2018, The D Language Foundation"
 license "BSL-1.0"
 
-targetType "none"
+targetType "library"
 dependency ":frontend" version="*"
+sourcePaths
 
 subPackage {
   name "root"
@@ -22,6 +23,7 @@ subPackage {
     "src/dmd/console.d" \
     "src/dmd/entity.d" \
     "src/dmd/errors.d" \
+    "src/dmd/diagnostic.d" \
     "src/dmd/filecache.d" \
     "src/dmd/globals.d" \
     "src/dmd/id.d" \

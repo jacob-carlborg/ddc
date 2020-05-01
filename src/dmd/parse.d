@@ -277,6 +277,8 @@ private bool writeMixin(const(char)[] s, ref Loc loc)
  */
 final class Parser(AST) : Lexer
 {
+    import dmd.diagnostic : DefaultDiagnosticHandler;
+
     AST.ModuleDeclaration* md;
     alias STC = AST.STC;
 
@@ -288,6 +290,7 @@ final class Parser(AST) : Lexer
         Loc endloc; // set to location of last right curly
         int inBrackets; // inside [] of array index or slice
         Loc lookingForElse; // location of lonely if looking for an else
+        DefaultDiagnosticHandler diagnosticHandler;
     }
 
     /*********************
@@ -297,7 +300,7 @@ final class Parser(AST) : Lexer
      */
     extern (D) this(const ref Loc loc, AST.Module _module, const(char)[] input, bool doDocComment)
     {
-        super(_module ? _module.srcfile.toChars() : null, input.ptr, 0, input.length, doDocComment, false);
+        super(_module ? _module.srcfile.toChars() : null, input.ptr, 0, input.length, doDocComment, false, diagnosticHandler.diagnosticHandler);
 
         //printf("Parser::Parser()\n");
         scanloc = loc;
@@ -319,12 +322,25 @@ final class Parser(AST) : Lexer
 
     extern (D) this(AST.Module _module, const(char)[] input, bool doDocComment)
     {
-        super(_module ? _module.srcfile.toChars() : null, input.ptr, 0, input.length, doDocComment, false);
+        super(_module ? _module.srcfile.toChars() : null, input.ptr, 0, input.length, doDocComment, false, diagnosticHandler.diagnosticHandler);
 
         //printf("Parser::Parser()\n");
         mod = _module;
         linkage = LINK.d;
         //nextToken();              // start up the scanner
+    }
+
+    final override TOK nextToken()
+    {
+        const result = super.nextToken();
+        diagnosticHandler.report();
+
+        return result;
+    }
+
+    void reportDiagnostics()
+    {
+        diagnosticHandler.report();
     }
 
     AST.Dsymbols* parseModule()

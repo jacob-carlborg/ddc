@@ -1585,6 +1585,7 @@ Expression semanticTraits(TraitsExp e, Scope* sc)
                     //printf("p.loc.linnum = %d\n", p.loc.linnum);
 
                     o = p.parseTypeOrAssignExp(TOK.endOfFile);
+                    p.reportDiagnostics();
                     if (olderrors != global.errors || p.token.value != TOK.endOfFile)
                     {
                         err = true;

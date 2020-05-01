@@ -2101,6 +2101,7 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
         p.nextToken();
 
         auto d = p.parseDeclDefs(0);
+        p.reportDiagnostics();
         if (global.errors != errors)
             return null;
 

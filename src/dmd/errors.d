@@ -560,6 +560,7 @@ private void colorHighlightCode(ref OutBuffer buf)
 {
     import dmd.lexer;
     import dmd.tokens;
+    import dmd.diagnostic : DefaultDiagnosticHandler;
 
     __gshared int nested;
     if (nested)
@@ -571,7 +572,8 @@ private void colorHighlightCode(ref OutBuffer buf)
     ++nested;
 
     auto gaggedErrorsSave = global.startGagging();
-    scope Lexer lex = new Lexer(null, cast(char*)buf[].ptr, 0, buf.length - 1, 0, 1);
+    auto diagnosticHandler = DefaultDiagnosticHandler();
+    scope Lexer lex = new Lexer(null, cast(char*)buf[].ptr, 0, buf.length - 1, 0, 1, diagnosticHandler.diagnosticHandler);
     OutBuffer res;
     const(char)* lastp = cast(char*)buf[].ptr;
     //printf("colorHighlightCode('%.*s')\n", cast(int)(buf.length - 1), buf.data);
@@ -582,6 +584,7 @@ private void colorHighlightCode(ref OutBuffer buf)
     {
         Token tok;
         lex.scan(&tok);
+        diagnosticHandler.report();
         res.writestring(lastp[0 .. tok.ptr - lastp]);
         HIGHLIGHT highlight;
         switch (tok.value)

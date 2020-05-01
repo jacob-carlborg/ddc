@@ -1979,6 +1979,7 @@ RootObject compileTypeMixin(TypeMixin tm, Loc loc, Scope* sc)
     //printf("p.loc.linnum = %d\n", p.loc.linnum);
 
     auto o = p.parseTypeOrAssignExp(TOK.endOfFile);
+    p.reportDiagnostics();
     if (errors != global.errors)
     {
         assert(global.errors != errors); // should have caught all these cases

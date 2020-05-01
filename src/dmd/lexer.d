@@ -21,6 +21,7 @@ import core.stdc.stdlib : getenv;
 import core.stdc.string;
 import core.stdc.time;
 
+import dmd.diagnostic : DiagnosticHandler, Severity, DefaultDiagnosticHandler, DefaultDiagnosticReporter;
 import dmd.entity;
 import dmd.errors;
 import dmd.globals;
@@ -155,16 +156,21 @@ unittest
     /* Not much here, just trying things out.
      */
     string text = "int"; // We rely on the implicit null-terminator
-    scope Lexer lex1 = new Lexer(null, text.ptr, 0, text.length, 0, 0);
+    DefaultDiagnosticHandler diagnosticHandler;
+    scope Lexer lex1 = new Lexer(null, text.ptr, 0, text.length, 0, 0, diagnosticHandler.diagnosticHandler);
     TOK tok;
     tok = lex1.nextToken();
+    diagnosticHandler.report();
     //printf("tok == %s, %d, %d\n", Token::toChars(tok), tok, TOK.int32);
     assert(tok == TOK.int32);
     tok = lex1.nextToken();
+    diagnosticHandler.report();
     assert(tok == TOK.endOfFile);
     tok = lex1.nextToken();
+    diagnosticHandler.report();
     assert(tok == TOK.endOfFile);
     tok = lex1.nextToken();
+    diagnosticHandler.report();
     assert(tok == TOK.endOfFile);
 }
 
@@ -190,8 +196,10 @@ unittest
 
     foreach (testcase; testcases)
     {
-        scope Lexer lex2 = new Lexer(null, testcase.ptr, 0, testcase.length-1, 0, 0);
+        DefaultDiagnosticHandler diagnosticHandler;
+        scope Lexer lex2 = new Lexer(null, testcase.ptr, 0, testcase.length-1, 0, 0, diagnosticHandler.diagnosticHandler);
         TOK tok = lex2.nextToken();
+        diagnosticHandler.report();
         size_t iterations = 1;
         while ((tok != TOK.endOfFile) && (iterations++ < testcase.length))
         {
@@ -229,6 +237,8 @@ class Lexer
         int lastDocLine;        // last line of previous doc comment
 
         Token* tokenFreelist;
+        DiagnosticHandler handleDiagnostic;
+        DefaultDiagnosticReporter diagnosticReporter;
     }
 
   nothrow:
@@ -244,9 +254,11 @@ class Lexer
      *  endoffset = the last offset to read into base[]
      *  doDocComment = handle documentation comments
      *  commentToken = comments become TOK.comment's
+     *  diagnosticHandler = diagnostic handler
      */
     this(const(char)* filename, const(char)* base, size_t begoffset,
-        size_t endoffset, bool doDocComment, bool commentToken) pure
+        size_t endoffset, bool doDocComment, bool commentToken,
+        DiagnosticHandler handleDiagnostic) pure
     {
         scanloc = Loc(filename, 1, 1);
         //printf("Lexer::Lexer(%p,%d)\n",base,length);
@@ -260,6 +272,8 @@ class Lexer
         this.commentToken = commentToken;
         this.inTokenStringConstant = 0;
         this.lastDocLine = 0;
+        this.handleDiagnostic = handleDiagnostic;
+
         //initKeywords();
         /* If first line starts with '#!', ignore the line
          */
@@ -308,7 +322,7 @@ class Lexer
         tokenFreelist = token;
     }
 
-    final TOK nextToken()
+    TOK nextToken()
     {
         prevloc = token.loc;
         if (token.next)
@@ -2283,7 +2297,7 @@ class Lexer
     {
         va_list args;
         va_start(args, format);
-        .verror(token.loc, format, args);
+        handleDiagnostic(token.loc, Severity.error, format, args);
         va_end(args);
     }
 
@@ -2291,7 +2305,31 @@ class Lexer
     {
         va_list args;
         va_start(args, format);
-        .verror(loc, format, args);
+        handleDiagnostic(loc, Severity.error, format, args);
+        va_end(args);
+    }
+
+    final void errorSupplemental(const ref Loc loc, const(char)* format, ...)
+    {
+        va_list args;
+        va_start(args, format);
+        handleDiagnostic(loc, Severity.error, format, args, true);
+        va_end(args);
+    }
+
+    final void warning(const ref Loc loc, const(char)* format, ...)
+    {
+        va_list args;
+        va_start(args, format);
+        handleDiagnostic(loc, Severity.warning, format, args);
+        va_end(args);
+    }
+
+    final void warningSupplemental(const ref Loc loc, const(char)* format, ...)
+    {
+        va_list args;
+        va_start(args, format);
+        handleDiagnostic(loc, Severity.warning, format, args, true);
         va_end(args);
     }
 
@@ -2299,7 +2337,15 @@ class Lexer
     {
         va_list args;
         va_start(args, format);
-        .vdeprecation(token.loc, format, args);
+        handleDiagnostic(token.loc, Severity.deprecation, format, args);
+        va_end(args);
+    }
+
+    final void deprecationSupplemental(const(char)* format, ...)
+    {
+        va_list args;
+        va_start(args, format);
+        handleDiagnostic(token.loc, Severity.deprecation, format, args, true);
         va_end(args);
     }
 

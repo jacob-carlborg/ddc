@@ -322,6 +322,7 @@ public Statement gccAsmSemantic(GccAsmStatement s, Scope *sc)
     // Parse the gcc asm statement.
     const errors = global.errors;
     s = p.parseGccAsm(s);
+    p.reportDiagnostics();
     if (errors != global.errors)
         return null;
     s.stc = sc.stc;
@@ -411,6 +412,7 @@ unittest
         scope p = new Parser!ASTCodegen(null, ";", false);
         p.token = *tokens;
         p.parseGccAsm(gas);
+        p.reportDiagnostics();
         return global.errors - errors;
     }
 

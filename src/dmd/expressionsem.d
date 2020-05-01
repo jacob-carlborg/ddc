@@ -5760,6 +5760,7 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
         //printf("p.loc.linnum = %d\n", p.loc.linnum);
 
         Expression e = p.parseExpression();
+        p.reportDiagnostics();
         if (global.errors != errors)
             return null;
 

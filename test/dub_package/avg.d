@@ -62,6 +62,7 @@ void main()
     scope p = new Parser!ASTBase(m, input, false);
     p.nextToken();
     m.members = p.parseModule();
+    p.reportDiagnostics();
 
     scope visitor = new FunctionLengthVisitor!ASTBase();
     writeln("Average function length: ", visitor.getAvgLen(m));

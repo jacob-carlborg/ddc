@@ -11,9 +11,9 @@
 
 module dmd.root.outbuffer;
 
-import core.stdc.stdarg;
 import core.stdc.stdio;
 import core.stdc.string;
+import dmd.root.stdarg;
 import dmd.root.rmem;
 import dmd.root.rootobject;
 import dmd.root.string;
@@ -21,6 +21,36 @@ import dmd.root.string;
 debug
 {
     debug = stomp; // flush out dangling pointer problems by stomping on unused memory
+}
+
+private extern (C) pure nothrow @nogc @system
+{
+    version (CRuntime_DigitalMars)
+    {
+        int _vsnprintf(scope char* s, size_t n, scope const char* format,
+            va_list arg);
+        alias _vsnprintf vsnprintf;
+    }
+
+    else version (CRuntime_Microsoft)
+    {
+        version (MinGW)
+        {
+            int __mingw_vsnprintf(scope char* s, size_t n,
+                scope const char* format, va_list arg);
+            alias __mingw_vsnprintf vsnprintf;
+        }
+
+        else
+            int vsnprintf(scope char* s, size_t n, scope const char* format,
+                va_list arg);
+    }
+
+    else version (Posix)
+        int vsnprintf(scope char* s, size_t n, scope const char* format,
+            va_list arg);
+    else
+        static assert( false, "Unsupported platform" );
 }
 
 struct OutBuffer
@@ -332,7 +362,7 @@ struct OutBuffer
         return cast(char[])data[offset - nbytes .. offset];
     }
 
-    extern (C++) void vprintf(const(char)* format, va_list args) nothrow
+    extern (C++) void vprintf(scope const(char)* format, va_list args) pure nothrow
     {
         int count;
         if (doindent && !notlinehead)

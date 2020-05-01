@@ -827,6 +827,7 @@ extern (C++) final class CompileStatement : Statement
         while (p.token.value != TOK.endOfFile)
         {
             Statement s = p.parseStatement(ParseStatementFlags.semi | ParseStatementFlags.curlyScope);
+            p.reportDiagnostics();
             if (!s || global.errors != errors)
                 return errorStatements();
             a.push(s);
