@@ -5259,7 +5259,8 @@ private void highlightCode2(Scope* sc, Dsymbols* a, ref OutBuffer buf, size_t of
     uint errorsave = global.startGagging();
 
     DefaultDiagnosticHandler diagnosticHandler;
-    scope Lexer lex = new Lexer(null, cast(char*)buf[].ptr, 0, buf.length - 1, 0, 1, diagnosticHandler.diagnosticHandler);
+    auto sourceManager = new SourceManager(null, buf[]);
+    scope Lexer lex = new Lexer(sourceManager, 0, buf.length - 1, 0, 1, diagnosticHandler.diagnosticHandler);
     OutBuffer res;
     const(char)* lastp = cast(char*)buf[].ptr;
     //printf("highlightCode2('%.*s')\n", cast(int)(buf.length - 1), buf[].ptr);

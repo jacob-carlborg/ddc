@@ -67,9 +67,11 @@ unittest
 private void lexUntilEndOfFile(string code, DiagnosticHandler diagnosticHandler)
 {
     import dmd.lexer : Lexer;
+    import dmd.globals : SourceManager;
     import dmd.tokens : TOK;
 
-    scope lexer = new Lexer("test", code.ptr, 0, code.length, 0, 0, diagnosticHandler);
+    auto sourceManager = new SourceManager("test", code);
+    scope lexer = new Lexer(0, code.length, 0, 0, diagnosticHandler);
     lexer.nextToken;
 
     while (lexer.nextToken != TOK.endOfFile) {}

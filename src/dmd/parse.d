@@ -300,7 +300,8 @@ final class Parser(AST) : Lexer
      */
     extern (D) this(const ref Loc loc, AST.Module _module, const(char)[] input, bool doDocComment)
     {
-        super(_module ? _module.srcfile.toChars() : null, input.ptr, 0, input.length, doDocComment, false, diagnosticHandler.diagnosticHandler);
+        auto sourceManager = new SourceManager(_module ? _module.srcfile.toChars() : null, input);
+        super(sourceManager, 0, input.length, doDocComment, false, diagnosticHandler.diagnosticHandler);
 
         //printf("Parser::Parser()\n");
         scanloc = loc;
@@ -322,7 +323,8 @@ final class Parser(AST) : Lexer
 
     extern (D) this(AST.Module _module, const(char)[] input, bool doDocComment)
     {
-        super(_module ? _module.srcfile.toChars() : null, input.ptr, 0, input.length, doDocComment, false, diagnosticHandler.diagnosticHandler);
+        auto sourceManager = new SourceManager(_module ? _module.srcfile.toChars() : null, input);
+        super(sourceManager, 0, input.length, doDocComment, false, diagnosticHandler.diagnosticHandler);
 
         //printf("Parser::Parser()\n");
         mod = _module;

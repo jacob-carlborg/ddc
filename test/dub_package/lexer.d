@@ -20,7 +20,8 @@ void main()
 
     immutable sourceCode = "void test() {} // foobar";
     auto diagnosticHandler = DefaultDiagnosticHandler();
-    scope lexer = new Lexer("test", sourceCode.ptr, 0, sourceCode.length, 0, 0, diagnosticHandler.diagnosticHandler);
+    auto sourceManager = new SourceManager("test", sourceCode);
+    scope lexer = new Lexer(sourceManager, 0, sourceCode.length, 0, 0, diagnosticHandler.diagnosticHandler);
     lexer.nextToken;
     diagnosticHandler.report();
 

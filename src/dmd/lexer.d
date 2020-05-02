@@ -157,7 +157,8 @@ unittest
      */
     string text = "int"; // We rely on the implicit null-terminator
     DefaultDiagnosticHandler diagnosticHandler;
-    scope Lexer lex1 = new Lexer(null, text.ptr, 0, text.length, 0, 0, diagnosticHandler.diagnosticHandler);
+    auto sourceManager = new SourceManager(null, text);
+    scope Lexer lex1 = new Lexer(sourceManager, 0, text.length, 0, 0, diagnosticHandler.diagnosticHandler);
     TOK tok;
     tok = lex1.nextToken();
     diagnosticHandler.report();
@@ -197,7 +198,8 @@ unittest
     foreach (testcase; testcases)
     {
         DefaultDiagnosticHandler diagnosticHandler;
-        scope Lexer lex2 = new Lexer(null, testcase.ptr, 0, testcase.length-1, 0, 0, diagnosticHandler.diagnosticHandler);
+        auto sourceManager = new SourceManager(null, testcase);
+        scope Lexer lex2 = new Lexer(sourceManager, 0, testcase.length-1, 0, 0, diagnosticHandler.diagnosticHandler);
         TOK tok = lex2.nextToken();
         diagnosticHandler.report();
         size_t iterations = 1;
@@ -239,7 +241,10 @@ class Lexer
         Token* tokenFreelist;
         DiagnosticHandler handleDiagnostic;
         DefaultDiagnosticReporter diagnosticReporter;
+        SourceManager sourceManager;
     }
+
+    invariant(sourceManager !is null);
 
   nothrow:
 
@@ -256,15 +261,17 @@ class Lexer
      *  commentToken = comments become TOK.comment's
      *  diagnosticHandler = diagnostic handler
      */
-    this(const(char)* filename, const(char)* base, size_t begoffset,
+    this(SourceManager sourceManager, size_t begoffset,
         size_t endoffset, bool doDocComment, bool commentToken,
         DiagnosticHandler handleDiagnostic) pure
+    in(sourceManager !is null)
     {
-        scanloc = Loc(filename, 1, 1);
+        this.sourceManager = sourceManager;
+        scanloc = sourceManager.newLocation(1, 1);
         //printf("Lexer::Lexer(%p,%d)\n",base,length);
         //printf("lexer.filename = %s\n", filename);
         token = Token.init;
-        this.base = base;
+        this.base = sourceManager.buffer.ptr;
         this.end = base + endoffset;
         p = base + begoffset;
         line = p;
@@ -362,7 +369,7 @@ class Lexer
     final void scan(Token* t)
     {
         const lastLine = scanloc.linnum;
-        Loc startLoc;
+        Loc startLoc = sourceManager.newLocation();
         t.blockComment = null;
         t.lineComment = null;
 

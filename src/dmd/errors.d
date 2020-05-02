@@ -573,7 +573,8 @@ private void colorHighlightCode(ref OutBuffer buf)
 
     auto gaggedErrorsSave = global.startGagging();
     auto diagnosticHandler = DefaultDiagnosticHandler();
-    scope Lexer lex = new Lexer(null, cast(char*)buf[].ptr, 0, buf.length - 1, 0, 1, diagnosticHandler.diagnosticHandler);
+    scope sourceManager = new SourceManager(null, buf[]);
+    scope Lexer lex = new Lexer(sourceManager, 0, buf.length - 1, 0, 1, diagnosticHandler.diagnosticHandler);
     OutBuffer res;
     const(char)* lastp = cast(char*)buf[].ptr;
     //printf("colorHighlightCode('%.*s')\n", cast(int)(buf.length - 1), buf.data);

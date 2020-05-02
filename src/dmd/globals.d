@@ -525,21 +525,105 @@ alias d_uns32 = uint32_t;
 alias d_int64 = int64_t;
 alias d_uns64 = uint64_t;
 
+final class SourceManager
+{
+    import std.container.array : Array;
+
+    private static struct LocationEntry
+    {
+        uint line;
+        uint column;
+    }
+
+    private const(char)[] buffer_;
+    private Array!LocationEntry locations;
+    private const(char)* filename; // either absolute or relative to cwd
+
+    this(const(char)* filename, const(char)[] buffer) pure nothrow
+    {
+        this.filename = filename;
+        buffer_ = buffer;
+    }
+
+    Loc newLocation(uint line, uint column) pure nothrow
+    {
+        locations ~= LocationEntry(line, column);
+        return Loc(this, cast(uint) (locations.length - 1));
+    }
+
+    Loc newLocation() pure nothrow
+    {
+        locations ~= LocationEntry();
+        return Loc(this, cast(uint) (locations.length - 1));
+    }
+
+    const(char)[] buffer() inout pure nothrow @nogc @safe
+    {
+        return buffer_;
+    }
+}
+
 // file location
 struct Loc
 {
-    const(char)* filename; // either absolute or relative to cwd
-    uint linnum;
-    uint charnum;
+    private const(void)* sourceManager_;
+    private uint position;
 
     static immutable Loc initial;       /// use for default initialization of const ref Loc's
 
 nothrow:
     extern (D) this(const(char)* filename, uint linnum, uint charnum) pure
     {
-        this.linnum = linnum;
-        this.charnum = charnum;
-        this.filename = filename;
+        // this.linnum = linnum;
+        // this.charnum = charnum;
+        // this.filename = filename;
+    }
+
+    extern (D) this(SourceManager sourceManager, uint position) pure @nogc
+    {
+        this.sourceManager_ = cast(void*) sourceManager;
+        this.position = position;
+    }
+
+    private SourceManager sourceManager() inout pure @nogc @trusted
+    {
+        return cast(SourceManager) sourceManager_;
+    }
+
+    const(char)* filename() inout pure @nogc @safe
+    {
+        pragma(inline, true);
+        return sourceManager.filename;
+    }
+
+    const(char)* filename(const(char)* value) pure @nogc @safe
+    {
+        pragma(inline, true);
+        return sourceManager.filename = value;
+    }
+
+    ref uint linnum() inout pure @nogc @safe
+    {
+        pragma(inline, true);
+        return sourceManager.locations[position].line;
+    }
+
+    uint linnum(uint value) pure @nogc @safe
+    {
+        pragma(inline, true);
+        return sourceManager.locations[position].line = value;
+    }
+
+    ref uint charnum() inout pure @nogc @safe
+    {
+        pragma(inline, true);
+        return sourceManager.locations[position].column;
+    }
+
+    uint charnum(uint value) pure @nogc @safe
+    {
+        pragma(inline, true);
+        return sourceManager.locations[position].column = value;
     }
 
     extern (C++) const(char)* toChars(
