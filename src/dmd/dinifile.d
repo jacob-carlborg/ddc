@@ -343,7 +343,8 @@ void parseConfFile(ref StringTable!(char*) environment, const(char)[] filename, 
                     auto pns = cast(char*)Mem.check(strdup(pn));
                     if (!writeToEnv(environment, pns))
                     {
-                        error(Loc(filename.xarraydup.ptr, lineNum, 0), "Use `NAME=value` syntax, not `%s`", pn);
+                        auto sourceManager = new SourceManager(filename.xarraydup.ptr, null);
+                        error(sourceManager.newLocation(lineNum, 0), "Use `NAME=value` syntax, not `%s`", pn);
                         fatal();
                     }
                     static if (LOG)

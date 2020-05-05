@@ -247,13 +247,13 @@ extern (C++) class Dsymbol : ASTNode
     final extern (D) this()
     {
         //printf("Dsymbol::Dsymbol(%p)\n", this);
-        loc = Loc(null, 0, 0);
+        loc = new SourceManager(null).newLocation(0, 0);
     }
 
     final extern (D) this(Identifier ident)
     {
         //printf("Dsymbol::Dsymbol(%p, ident)\n", this);
-        this.loc = Loc(null, 0, 0);
+        this();
         this.ident = ident;
     }
 

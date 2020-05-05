@@ -527,6 +527,7 @@ alias d_uns64 = uint64_t;
 
 final class SourceManager
 {
+    import dmd.root.string : toDString;
     import std.container.array : Array;
 
     private static struct LocationEntry
@@ -535,14 +536,29 @@ final class SourceManager
         uint column;
     }
 
-    private const(char)[] buffer_;
+    FileName filename; // either absolute or relative to cwd
+    private const(void)[] buffer_;
     private Array!LocationEntry locations;
-    private const(char)* filename; // either absolute or relative to cwd
 
-    this(const(char)* filename, const(char)[] buffer) pure nothrow
+    this(FileName filename, const(void)[] buffer) pure nothrow
     {
         this.filename = filename;
         buffer_ = buffer;
+    }
+
+    this(const(char)[] filename, const(void)[] buffer) pure nothrow
+    {
+        this(FileName(filename), buffer);
+    }
+
+    this(const(char)* filename, const(void)[] buffer) pure nothrow
+    {
+        this(filename.toDString, buffer);
+    }
+
+    this(const(void)[] buffer)
+    {
+        this(string.init, buffer);
     }
 
     Loc newLocation(uint line, uint column) pure nothrow
@@ -557,7 +573,7 @@ final class SourceManager
         return Loc(this, cast(uint) (locations.length - 1));
     }
 
-    const(char)[] buffer() inout pure nothrow @nogc @safe
+    const(void)[] buffer() const pure nothrow @nogc
     {
         return buffer_;
     }
@@ -566,18 +582,21 @@ final class SourceManager
 // file location
 struct Loc
 {
+    import dmd.root.string : toDString;
+
     private const(void)* sourceManager_;
     private uint position;
 
     static immutable Loc initial;       /// use for default initialization of const ref Loc's
 
 nothrow:
-    extern (D) this(const(char)* filename, uint linnum, uint charnum) pure
-    {
-        // this.linnum = linnum;
-        // this.charnum = charnum;
-        // this.filename = filename;
-    }
+    // @disable this();
+    // extern (D) this(const(char)* filename, uint linnum, uint charnum) pure
+    // {
+    //     // this.linnum = linnum;
+    //     // this.charnum = charnum;
+    //     // this.filename = filename;
+    // }
 
     extern (D) this(SourceManager sourceManager, uint position) pure @nogc
     {
@@ -593,13 +612,14 @@ nothrow:
     const(char)* filename() inout pure @nogc @safe
     {
         pragma(inline, true);
-        return sourceManager.filename;
+        return sourceManager.filename.toChars;
     }
 
-    const(char)* filename(const(char)* value) pure @nogc @safe
+    const(char)* filename(const(char)* value) pure
     {
         pragma(inline, true);
-        return sourceManager.filename = value;
+        sourceManager.filename = FileName(value.toDString);
+        return value;
     }
 
     ref uint linnum() inout pure @nogc @safe

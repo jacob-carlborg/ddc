@@ -76,7 +76,8 @@ extern (D) void error(Loc loc, const(char)* format, ...)
  */
 extern (C++) void error(const(char)* filename, uint linnum, uint charnum, const(char)* format, ...)
 {
-    const loc = Loc(filename, linnum, charnum);
+    auto sourceManager = new SourceManager(filename, null);
+    const loc = sourceManager.newLocation(linnum, charnum);
     va_list ap;
     va_start(ap, format);
     verror(loc, format, ap);
@@ -573,7 +574,7 @@ private void colorHighlightCode(ref OutBuffer buf)
 
     auto gaggedErrorsSave = global.startGagging();
     auto diagnosticHandler = DefaultDiagnosticHandler();
-    scope sourceManager = new SourceManager(null, buf[]);
+    scope sourceManager = new SourceManager(string.init, buf[]);
     scope Lexer lex = new Lexer(sourceManager, 0, buf.length - 1, 0, 1, diagnosticHandler.diagnosticHandler);
     OutBuffer res;
     const(char)* lastp = cast(char*)buf[].ptr;

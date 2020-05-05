@@ -413,7 +413,6 @@ extern (C++) final class Module : Package
 
     const(char)[] arg;           // original argument name
     ModuleDeclaration* md;      // if !=null, the contents of the ModuleDeclaration declaration
-    const FileName srcfile;     // input source file
     const FileName objfile;     // output .obj file
     const FileName hdrfile;     // 'header' file
     FileName docfile;           // output documentation file
@@ -505,12 +504,15 @@ extern (C++) final class Module : Package
     size_t nameoffset;          // offset of module name from start of ModuleInfo
     size_t namelen;             // length of module name in characters
 
-    extern (D) this(const ref Loc loc, const(char)[] filename, Identifier ident, int doDocComment, int doHdrGen)
+    private SourceManager sourceManager;
+
+    extern (D) this(const ref Loc loc, SourceManager sourceManager, Identifier ident, int doDocComment, int doHdrGen)
     {
         super(loc, ident);
         const(char)[] srcfilename;
         //printf("Module::Module(filename = '%s', ident = '%s')\n", filename, ident.toChars());
-        this.arg = filename;
+        this.arg = sourceManager.filename.toString;
+        const filename = arg;
         srcfilename = FileName.defaultExt(filename, global.mars_ext);
         if (global.run_noext && global.params.run &&
             !FileName.ext(filename) &&
@@ -531,7 +533,7 @@ extern (C++) final class Module : Package
             fatal();
         }
 
-        srcfile = FileName(srcfilename);
+        sourceManager.filename = FileName(srcfilename);
         objfile = setOutfilename(global.params.objname, global.params.objdir, filename, global.obj_ext);
         if (doDocComment)
             setDocfile();
@@ -540,19 +542,19 @@ extern (C++) final class Module : Package
         escapetable = new Escape();
     }
 
-    extern (D) this(const(char)[] filename, Identifier ident, int doDocComment, int doHdrGen)
+    extern (D) this(SourceManager sourceManager, Identifier ident, int doDocComment, int doHdrGen)
     {
-        this(Loc.initial, filename, ident, doDocComment, doHdrGen);
+        this(Loc.initial, sourceManager, ident, doDocComment, doHdrGen);
     }
 
-    static Module create(const(char)* filename, Identifier ident, int doDocComment, int doHdrGen)
+    extern (D) static Module create(SourceManager sourceManager, Identifier ident, int doDocComment, int doHdrGen)
     {
-        return create(filename.toDString, ident, doDocComment, doHdrGen);
+        return new Module(Loc.initial, sourceManager, ident, doDocComment, doHdrGen);
     }
 
-    extern (D) static Module create(const(char)[] filename, Identifier ident, int doDocComment, int doHdrGen)
+    const(FileName) srcfile()
     {
-        return new Module(Loc.initial, filename, ident, doDocComment, doHdrGen);
+        return sourceManager.filename;
     }
 
     static Module load(Loc loc, Identifiers* packages, Identifier ident)

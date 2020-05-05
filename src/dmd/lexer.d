@@ -268,10 +268,11 @@ class Lexer
     {
         this.sourceManager = sourceManager;
         scanloc = sourceManager.newLocation(1, 1);
+        prevloc = sourceManager.newLocation(0, 0);
         //printf("Lexer::Lexer(%p,%d)\n",base,length);
         //printf("lexer.filename = %s\n", filename);
         token = Token.init;
-        this.base = sourceManager.buffer.ptr;
+        this.base = (cast(const(char)[])sourceManager.buffer).ptr;
         this.end = base + endoffset;
         p = base + begoffset;
         line = p;

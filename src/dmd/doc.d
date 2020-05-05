@@ -431,9 +431,10 @@ extern(C++) void gendocfile(Module m)
     if (m.isDocFile)
     {
         const ploc = m.md ? &m.md.loc : &m.loc;
-        const loc = Loc(ploc.filename ? ploc.filename : srcfilename.ptr,
-                        ploc.linnum,
-                        ploc.charnum);
+        auto sourceManager = new SourceManager(
+            ploc.filename ? ploc.filename : srcfilename.ptr, null)
+        ;
+        const loc = sourceManager.newLocation(ploc.linnum, ploc.charnum);
 
         size_t commentlen = strlen(cast(char*)m.comment);
         Dsymbols a;
@@ -5259,7 +5260,7 @@ private void highlightCode2(Scope* sc, Dsymbols* a, ref OutBuffer buf, size_t of
     uint errorsave = global.startGagging();
 
     DefaultDiagnosticHandler diagnosticHandler;
-    auto sourceManager = new SourceManager(null, buf[]);
+    auto sourceManager = new SourceManager(buf[]);
     scope Lexer lex = new Lexer(sourceManager, 0, buf.length - 1, 0, 1, diagnosticHandler.diagnosticHandler);
     OutBuffer res;
     const(char)* lastp = cast(char*)buf[].ptr;
