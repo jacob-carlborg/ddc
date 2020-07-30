@@ -51,38 +51,43 @@ struct FileBuffer
 ///
 struct File
 {
-    ///
-    static struct ReadResult
+    bool success;
+    FileBuffer buffer;
+    const FileName filename;
+
+    this(FileName filename, FileBuffer buffer = FileBuffer())
     {
-        bool success;
-        FileBuffer buffer;
+        import std.algorithm : move;
 
-        /// Transfers ownership of the buffer to the caller.
-        ubyte[] extractSlice() pure nothrow @nogc @safe
-        {
-            return buffer.extractSlice();
-        }
+        this.filename = filename;
+        this.buffer = move(buffer);
+    }
 
-        /// ditto
-        /// Include the null-terminator at the end of the buffer in the returned array.
-        ubyte[] extractDataZ() @nogc nothrow pure
-        {
-            auto result = buffer.extractSlice();
-            return result.ptr[0 .. result.length + 1];
-        }
+    /// Transfers ownership of the buffer to the caller.
+    ubyte[] extractSlice() pure nothrow @nogc @safe
+    {
+        return buffer.extractSlice();
+    }
+
+    /// ditto
+    /// Include the null-terminator at the end of the buffer in the returned array.
+    ubyte[] extractDataZ() @nogc nothrow pure
+    {
+        auto result = buffer.extractSlice();
+        return result.ptr[0 .. result.length + 1];
     }
 
 nothrow:
     /// Read the full content of a file.
-    extern (C++) static ReadResult read(const(char)* name)
+    extern (C++) static File read(const(char)* name)
     {
         return read(name.toDString());
     }
 
     /// Ditto
-    static ReadResult read(const(char)[] name)
+    static File read(const(char)[] name)
     {
-        ReadResult result;
+        auto result = File(FileName(name));
 
         version (Posix)
         {
