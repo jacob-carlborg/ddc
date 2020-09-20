@@ -21,6 +21,7 @@ import dmd.backend.cc;
 import dmd.backend.cdef;
 import dmd.backend.global;
 import dmd.backend.code;
+import dmd.backend.symtab;
 
 extern (C++):
 
@@ -33,7 +34,7 @@ version (all) // free function version
 {
     import dmd.backend.dvarstats;
 
-    void varStats_writeSymbolTable(symtab_t* symtab,
+    void varStats_writeSymbolTable(ref symtab_t symtab,
             void function(Symbol*) nothrow fnWriteVar, void function() nothrow fnEndArgs,
             void function(int off,int len) nothrow fnBeginBlock, void function() nothrow fnEndBlock)
     {
@@ -121,7 +122,7 @@ private extern (C) static int cmpLifeTime(scope const void* p1, scope const void
 // a parent scope contains the creation offset of the child scope
 private static extern(D) SYMIDX isParentScope(LifeTime[] lifetimes, SYMIDX parent, SYMIDX si)
 {
-    if(parent < 0) // full function
+    if (parent == SYMIDX.max) // full function
         return true;
     return lifetimes[parent].offCreate <= lifetimes[si].offCreate &&
            lifetimes[parent].offDestroy > lifetimes[si].offCreate;
@@ -130,10 +131,13 @@ private static extern(D) SYMIDX isParentScope(LifeTime[] lifetimes, SYMIDX paren
 // find a symbol that includes the creation of the given symbol as part of its life time
 private static extern(D) SYMIDX findParentScope(LifeTime[] lifetimes, SYMIDX si)
 {
-    for(SYMIDX sj = si - 1; sj >= 0; --sj)
-        if(isParentScope(lifetimes, sj, si))
-           return sj;
-    return -1;
+    if (si != SYMIDX.max)
+    {
+        for(SYMIDX sj = si; sj; --sj)
+            if(isParentScope(lifetimes, sj - 1, si))
+               return sj;
+    }
+    return SYMIDX.max;
 }
 
 private static int getHash(const(char)* s)
@@ -144,18 +148,17 @@ private static int getHash(const(char)* s)
     return hash;
 }
 
-private bool hashSymbolIdentifiers(symtab_t* symtab)
+private bool hashSymbolIdentifiers(ref symtab_t symtab)
 {
     // build circular-linked lists of symbols with same identifier hash
     bool hashCollisions = false;
-    SYMIDX[256] firstSym = void;
-    memset(firstSym.ptr, -1, (firstSym).sizeof);
-    for (SYMIDX si = 0; si < symtab.top; si++)
+    SYMIDX[256] firstSym = SYMIDX.max;
+    for (SYMIDX si = 0; si < symtab.length; si++)
     {
-        Symbol* sa = symtab.tab[si];
+        Symbol* sa = symtab[si];
         int hash = getHash(sa.Sident.ptr) & 255;
         SYMIDX first = firstSym[hash];
-        if (first == -1)
+        if (first == SYMIDX.max)
         {
             // connect full circle, so we don't have to recalculate the hash
             nextSym[si] = si;
@@ -172,7 +175,7 @@ private bool hashSymbolIdentifiers(symtab_t* symtab)
     return hashCollisions;
 }
 
-private bool hasUniqueIdentifier(symtab_t* symtab, SYMIDX si)
+private bool hasUniqueIdentifier(ref symtab_t symtab, SYMIDX si)
 {
     Symbol* sa = symtab.tab[si];
     for (SYMIDX sj = nextSym[si]; sj != si; sj = nextSym[sj])
@@ -183,28 +186,29 @@ private bool hasUniqueIdentifier(symtab_t* symtab, SYMIDX si)
 
 // gather statistics about creation and destructions of variables that are
 //  used by the current function
-private symtab_t* calcLexicalScope(symtab_t* symtab) return
+private symtab_t* calcLexicalScope(return ref symtab_t symtab) return
 {
     // make a copy of the symbol table
     // - arguments should be kept at the very beginning
     // - variables with unique name come first (will be emitted with full function scope)
     // - variables with duplicate names are added with ascending code offset
-    if (sortedSymtab.symmax < symtab.top)
+    if (sortedSymtab.symmax < symtab.length)
     {
-        nextSym = cast(int*)util_realloc(nextSym, symtab.top, (*nextSym).sizeof);
-        sortedSymtab.tab = cast(Symbol**) util_realloc(sortedSymtab.tab, symtab.top, (Symbol*).sizeof);
-        sortedSymtab.symmax = symtab.top;
+        nextSym = cast(SYMIDX*)util_realloc(nextSym, symtab.length, (*nextSym).sizeof);
+        sortedSymtab.tab = cast(Symbol**) util_realloc(sortedSymtab.tab, symtab.length, (Symbol*).sizeof);
+        sortedSymtab.symmax = symtab.length;
     }
+    sortedSymtab.length = symtab.length;
 
     if (!hashSymbolIdentifiers(symtab))
     {
         // without any collisions, there are no duplicate symbol names, so bail out early
-        uniquecnt = symtab.top;
-        return symtab;
+        uniquecnt = cast(int)symtab.length;
+        return &symtab;
     }
 
     SYMIDX argcnt;
-    for (argcnt = 0; argcnt < symtab.top; argcnt++)
+    for (argcnt = 0; argcnt < symtab.length; argcnt++)
     {
         Symbol* sa = symtab.tab[argcnt];
         if (sa.Sclass != SCparameter && sa.Sclass != SCregpar && sa.Sclass != SCfastpar && sa.Sclass != SCshadowreg)
@@ -213,19 +217,19 @@ private symtab_t* calcLexicalScope(symtab_t* symtab) return
     }
 
     // find symbols with identical names, only these need lexical scope
-    uniquecnt = argcnt;
+    uniquecnt = cast(int)argcnt;
     SYMIDX dupcnt = 0;
-    for (SYMIDX sj, si = argcnt; si < symtab.top; si++)
+    for (SYMIDX sj, si = argcnt; si < symtab.length; si++)
     {
         Symbol* sa = symtab.tab[si];
         if (!isLexicalScopeVar(sa) || hasUniqueIdentifier(symtab, si))
             sortedSymtab.tab[uniquecnt++] = sa;
         else
-            sortedSymtab.tab[symtab.top - 1 - dupcnt++] = sa; // fill from the top
+            sortedSymtab.tab[symtab.length - 1 - dupcnt++] = sa; // fill from the top
     }
-    sortedSymtab.top = symtab.top;
+    sortedSymtab.length = symtab.length;
     if(dupcnt == 0)
-        return symtab;
+        return &symtab;
 
     sortLineOffsets();
 
@@ -235,18 +239,18 @@ private symtab_t* calcLexicalScope(symtab_t* symtab) return
 
     for (SYMIDX si = 0; si < dupcnt; si++)
     {
-        lifeTimes[si].sym = sortedSymtab.tab[uniquecnt + si];
+        lifeTimes[si].sym = sortedSymtab[uniquecnt + si];
         lifeTimes[si].offCreate = cast(int)getLineOffset(lifeTimes[si].sym.lnoscopestart);
         lifeTimes[si].offDestroy = cast(int)getLineOffset(lifeTimes[si].sym.lnoscopeend);
     }
-    cntUsedLifeTimes = dupcnt;
+    cntUsedLifeTimes = cast(int)dupcnt;
     qsort(lifeTimes.ptr, dupcnt, (lifeTimes[0]).sizeof, &cmpLifeTime);
 
     // ensure that an inner block does not extend beyond the end of a parent block
     for (SYMIDX si = 0; si < dupcnt; si++)
     {
         SYMIDX sj = findParentScope(lifeTimes, si);
-        if(sj >= 0 && lifeTimes[si].offDestroy > lifeTimes[sj].offDestroy)
+        if(sj != SYMIDX.max && lifeTimes[si].offDestroy > lifeTimes[sj].offDestroy)
             lifeTimes[si].offDestroy = lifeTimes[sj].offDestroy;
     }
 
@@ -267,25 +271,25 @@ private symtab_t* calcLexicalScope(symtab_t* symtab) return
 
     // store duplicate symbols back with new ordering
     for (SYMIDX si = 0; si < dupcnt; si++)
-        sortedSymtab.tab[uniquecnt + si] = lifeTimes[si].sym;
+        sortedSymtab[uniquecnt + si] = lifeTimes[si].sym;
 
     return &sortedSymtab;
 }
 
-public void writeSymbolTable(symtab_t* symtab,
+public void writeSymbolTable(ref symtab_t symtab,
             void function(Symbol*) nothrow fnWriteVar, void function() nothrow fnEndArgs,
             void function(int off,int len) nothrow fnBeginBlock, void function() nothrow fnEndBlock)
 {
-    symtab = calcLexicalScope(symtab);
+    auto symtab2 = calcLexicalScope(symtab);
 
     int openBlocks = 0;
     int lastOffset = 0;
 
     // Write local symbol table
     bool endarg = false;
-    for (SYMIDX si = 0; si < symtab.top; si++)
+    for (SYMIDX si = 0; si < symtab2.length; si++)
     {
-        Symbol *sa = symtab.tab[si];
+        Symbol *sa = (*symtab2)[si];
         if (endarg == false &&
             sa.Sclass != SCparameter &&
             sa.Sclass != SCfastpar &&
@@ -300,9 +304,9 @@ public void writeSymbolTable(symtab_t* symtab,
         {
             int off = lifeTimes[si - uniquecnt].offCreate;
             // close scopes that end before the creation of this symbol
-            for (SYMIDX sj = si - 1; sj >= uniquecnt; --sj)
+            for (SYMIDX sj = si; sj > uniquecnt; --sj)
             {
-                if (lastOffset < lifeTimes[sj - uniquecnt].offDestroy && lifeTimes[sj - uniquecnt].offDestroy <= off)
+                if (lastOffset < lifeTimes[sj - 1 - uniquecnt].offDestroy && lifeTimes[sj - 1 - uniquecnt].offDestroy <= off)
                 {
                     assert(openBlocks > 0);
                     if(fnEndBlock)

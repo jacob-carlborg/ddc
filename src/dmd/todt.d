@@ -165,7 +165,7 @@ extern (C++) void Initializer_toDt(Initializer init, ref DtBuilder dtb)
                 }
                 else if (ai.dim > tadim)
                 {
-                    error(ai.loc, "too many initializers, %d, for array[%d]", ai.dim, tadim);
+                    error(ai.loc, "too many initializers, %u, for array[%llu]", ai.dim, cast(ulong) tadim);
                 }
                 dtb.cat(dtbarray);
                 break;
@@ -390,7 +390,10 @@ extern (C++) void Expression_toDt(Expression e, ref DtBuilder dtb)
                     dtb.xoff(s, 0);
                 }
                 else
-                    dtb.abytes(0, n * e.sz, p, cast(uint)e.sz);
+                {
+                    ubyte pow2 = e.sz == 4 ? 2 : 1;
+                    dtb.abytes(0, n * e.sz, p, cast(uint)e.sz, pow2);
+                }
                 break;
 
             case Tsarray:
@@ -533,7 +536,7 @@ extern (C++) void Expression_toDt(Expression e, ref DtBuilder dtb)
 
     void visitClassReference(ClassReferenceExp e)
     {
-        InterfaceDeclaration to = (cast(TypeClass)e.type).sym.isInterfaceDeclaration();
+        auto to = e.type.toBasetype().isTypeClass().sym.isInterfaceDeclaration();
 
         if (to) //Static typeof this literal is an interface. We must add offset to symbol
         {
@@ -1328,19 +1331,16 @@ private extern (C++) class TypeInfoDtVisitor : Visitor
 
         if (global.params.is64bit)
         {
-            Type t = sd.arg1type;
             foreach (i; 0 .. 2)
             {
                 // m_argi
-                if (t)
+                if (auto t = sd.argType(i))
                 {
                     genTypeInfo(d.loc, t, null);
                     dtb.xoff(toSymbol(t.vtinfo), 0);
                 }
                 else
                     dtb.size(0);
-
-                t = sd.arg2type;
             }
         }
 

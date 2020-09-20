@@ -1,5 +1,5 @@
 // PERMUTE_ARGS:
-// REQUIRED_ARGS: -D -Dd${RESULTS_DIR}/compilable -o- -preview=markdown
+// REQUIRED_ARGS: -D -Dd${RESULTS_DIR}/compilable -o-
 // POST_SCRIPT: compilable/extra-files/ddocAny-postscript.sh
 
 /++
@@ -8,7 +8,7 @@
 [D Site]: https://dlang.org 'D lives here'
 [unused reference]: https://nowhere.com
 
-A link to [partition].
+A link to [printf].
 
 A link to [the base object][Object].
 
@@ -38,4 +38,4 @@ $(P
 +/
 module test.compilable.ddoc_markdown_links;
 
-import std.algorithm.sorting;
+import core.stdc.stdio;

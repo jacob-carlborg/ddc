@@ -280,7 +280,7 @@ bool discardValue(Expression e)
                     }
                     else
                         s = ce.e1.toChars();
-                    e.warning("calling %s without side effects discards return value of type %s, prepend a cast(void) if intentional", s, e.type.toChars());
+                    e.warning("calling `%s` without side effects discards return value of type `%s`; prepend a `cast(void)` if intentional", s, e.type.toChars());
                 }
             }
         }
@@ -334,8 +334,8 @@ bool discardValue(Expression e)
             {
                 return false;
             }
-            // Don't check e1 until we cast(void) the a,b code generation
-            //discardValue(ce.e1);
+            // Don't check e1 until we cast(void) the a,b code generation.
+            // This is concretely done in expressionSemantic, if a CommaExp has Tvoid as type
             return discardValue(ce.e2);
         }
     case TOK.tuple:

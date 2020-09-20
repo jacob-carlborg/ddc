@@ -64,7 +64,7 @@ final class LibElf : Library
 
     extern (D) this()
     {
-        tab._init(14000);
+        tab._init(14_000);
     }
 
     /***************************************
@@ -77,13 +77,13 @@ final class LibElf : Library
     {
         static if (LOG)
         {
-            printf("LibElf::addObject(%s)\n",
+            printf("LibElf::addObject(%.*s)\n",
                    cast(int)module_name.length, module_name.ptr);
         }
 
         void corrupt(int reason)
         {
-            error("corrupt ELF object module %s %d",
+            error("corrupt ELF object module %.*s %d",
                   cast(int)module_name.length, module_name.ptr, reason);
         }
 
@@ -515,9 +515,9 @@ extern (C++) void ElfOmToHeader(ElfLibHeader* h, ElfObjModule* om)
     char* buffer = cast(char*)h;
     // user_id and group_id are padded on 6 characters in Header struct.
     // Squashing to 0 if more than 999999.
-    if (om.user_id > 999999)
+    if (om.user_id > 999_999)
         om.user_id = 0;
-    if (om.group_id > 999999)
+    if (om.group_id > 999_999)
         om.group_id = 0;
     size_t len;
     if (om.name_offset == -1)

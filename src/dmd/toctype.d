@@ -11,6 +11,7 @@
 
 module dmd.toctype;
 
+import core.stdc.stdio;
 import core.stdc.stdlib;
 
 import dmd.backend.cc : Classsym, Symbol;
@@ -134,7 +135,7 @@ public:
         {
             Parameter p = t.parameterList[i];
             type* tp = Type_toCtype(p.type);
-            if (p.storageClass & (STC.out_ | STC.ref_))
+            if (p.isReference())
                 tp = type_allocn(TYnref, tp);
             else if (p.storageClass & STC.lazy_)
             {
@@ -161,7 +162,9 @@ public:
         {
             // Create a new backend type
             StructDeclaration sym = t.sym;
-            t.ctype = type_struct_class(sym.toPrettyChars(true), sym.alignsize, sym.structsize, sym.arg1type ? Type_toCtype(sym.arg1type) : null, sym.arg2type ? Type_toCtype(sym.arg2type) : null, sym.isUnionDeclaration() !is null, false, sym.isPOD() != 0, sym.hasNoFields);
+            auto arg1type = sym.argType(0);
+            auto arg2type = sym.argType(1);
+            t.ctype = type_struct_class(sym.toPrettyChars(true), sym.alignsize, sym.structsize, arg1type ? Type_toCtype(arg1type) : null, arg2type ? Type_toCtype(arg2type) : null, sym.isUnionDeclaration() !is null, false, sym.isPOD() != 0, sym.hasNoFields);
             /* Add in fields of the struct
              * (after setting ctype to avoid infinite recursion)
              */

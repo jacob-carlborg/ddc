@@ -68,6 +68,7 @@ import dmd.backend.global;
 import dmd.backend.obj;
 import dmd.backend.oper;
 import dmd.backend.rtlsym;
+import dmd.backend.symtab;
 import dmd.backend.ty;
 import dmd.backend.type;
 
@@ -244,7 +245,7 @@ private elem *callfunc(const ref Loc loc,
 
             if (i - j < tf.parameterList.length &&
                 i >= j &&
-                tf.parameterList[i - j].storageClass & (STC.out_ | STC.ref_))
+                tf.parameterList[i - j].isReference())
             {
                 /* `ref` and `out` parameters mean convert
                  * corresponding argument to a pointer
@@ -272,11 +273,7 @@ private elem *callfunc(const ref Loc loc,
         }
         if (!left_to_right)
         {
-            /* Avoid 'fixing' side effects of _array... functions as
-             * they were already working right from the olden days before this fix
-             */
-            if (!(ec.Eoper == OPvar && fd.isArrayOp))
-                eside = fixArgumentEvaluationOrder(elems);
+            eside = fixArgumentEvaluationOrder(elems);
         }
 
         foreach (ref e; elems)
@@ -557,9 +554,13 @@ if (!irs.params.is64bit) assert(tysize(TYnptr) == 4);
     else if (retmethod == RET.stack)
     {
         if (irs.params.isOSX && eresult)
+        {
             /* ABI quirk: hidden pointer is not returned in registers
              */
+            if (tyaggregate(tyret))
+                e.ET = Type_toCtype(tret);
             e = el_combine(e, el_copytree(eresult));
+        }
         e.Ety = TYnptr;
         e = el_una(OPind, tyret, e);
     }
@@ -972,10 +973,11 @@ private elem *setArray(Expression exp, elem *eptr, elem *edim, Type tb, elem *ev
 {
     assert(op == TOK.blit || op == TOK.assign || op == TOK.construct);
     const sz = cast(uint)tb.size();
+    Type tb2 = tb;
 
 Lagain:
     int r;
-    switch (tb.ty)
+    switch (tb2.ty)
     {
         case Tfloat80:
         case Timaginary80:
@@ -1005,11 +1007,11 @@ Lagain:
             if (!irs.params.is64bit)
                 goto default;
 
-            TypeStruct tc = cast(TypeStruct)tb;
+            TypeStruct tc = cast(TypeStruct)tb2;
             StructDeclaration sd = tc.sym;
-            if (sd.arg1type && !sd.arg2type)
+            if (sd.numArgTypes() == 1)
             {
-                tb = sd.arg1type;
+                tb2 = sd.argType(0);
                 goto Lagain;
             }
             goto default;
@@ -1325,7 +1327,7 @@ elem *toElem(Expression e, IRState *irs)
                 goto L1;
             }
 
-            if (s.Sclass == SCauto && s.Ssymnum == -1)
+            if (s.Sclass == SCauto && s.Ssymnum == SYMIDX.max)
             {
                 //printf("\tadding symbol %s\n", s.Sident);
                 symbol_add(s);
@@ -2742,7 +2744,7 @@ elem *toElem(Expression e, IRState *irs)
                 Type ta = are.e1.type.toBasetype();
 
                 // which we do if the 'next' types match
-                if (ae.memset & MemorySet.blockAssign)
+                if (ae.memset == MemorySet.blockAssign)
                 {
                     // Do a memset for array[]=v
                     //printf("Lpair %s\n", ae.toChars());
@@ -2930,8 +2932,9 @@ elem *toElem(Expression e, IRState *irs)
                         /* Construct:
                          *   memcpy(ex.ptr, ey.ptr, nbytes)[0..elen]
                          */
-                        elem* e = el_params(nbytes, epfr, epto, null);
-                        e = el_bin(OPcall,TYnptr,el_var(getRtlsym(RTLSYM_MEMCPY)),e);
+                        elem* e = el_bin(OPmemcpy, TYnptr, epto, el_param(epfr, nbytes));
+                        //elem* e = el_params(nbytes, epfr, epto, null);
+                        //e = el_bin(OPcall,TYnptr,el_var(getRtlsym(RTLSYM_MEMCPY)),e);
                         e = el_pair(eto.Ety, el_copytree(elen), e);
 
                         /* Combine: eto, efrom, echeck, e
@@ -2978,7 +2981,7 @@ elem *toElem(Expression e, IRState *irs)
 
             /* Look for initialization of an `out` or `ref` variable
              */
-            if (ae.memset & MemorySet.referenceInit)
+            if (ae.memset == MemorySet.referenceInit)
             {
                 assert(ae.op == TOK.construct || ae.op == TOK.blit);
                 auto ve = ae.e1.isVarExp();
@@ -3115,6 +3118,36 @@ elem *toElem(Expression e, IRState *irs)
                     {
                         elem* e = toElemStructLit(sle, irs, ae.op, ex.EV.Vsym, true);
                         el_free(e1);
+                        return setResult2(e);
+                    }
+
+                    static bool allZeroBits(ref Expressions exps)
+                    {
+                        foreach (e; exps[])
+                        {
+                            /* The expression types checked can be expanded to include
+                             * floating point, struct literals, and array literals.
+                             * Just be careful to return false for -0.0
+                             */
+                            if (!e ||
+                                e.op == TOK.int64 && e.isIntegerExp().toInteger() == 0 ||
+                                e.op == TOK.null_)
+                                continue;
+                            return false;
+                        }
+                        return true;
+                    }
+
+                    /* Use a memset to 0
+                     */
+                    if ((sle.useStaticInit ||
+                         sle.elements && allZeroBits(*sle.elements) && !sle.sd.isNested()) &&
+                        ae.e2.type.isZeroInit(ae.e2.loc))
+                    {
+                        elem* enbytes = el_long(TYsize_t, ae.e1.type.size());
+                        elem* evalue = el_long(TYsize_t, 0);
+                        elem* el = el_una(OPaddr, TYnptr, e1);
+                        elem* e = el_bin(OPmemset,TYnptr, el, el_param(enbytes, evalue));
                         return setResult2(e);
                     }
                 }
@@ -3627,7 +3660,7 @@ elem *toElem(Expression e, IRState *irs)
             assert(txb.ty == tyb.ty);
 
             // https://issues.dlang.org/show_bug.cgi?id=14730
-            if (irs.params.useInline && v.offset == 0)
+            if (v.offset == 0)
             {
                 FuncDeclaration fd = v.parent.isFuncDeclaration();
                 if (fd && fd.semanticRun < PASS.obj)

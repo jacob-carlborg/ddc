@@ -117,13 +117,14 @@ enum MODFlags
 };
 typedef unsigned char MOD;
 
-enum VarArg
+enum VarArgValues
 {
     VARARGnone     = 0,  /// fixed number of arguments
     VARARGvariadic = 1,  /// T t, ...)  can be C-style (core.stdc.stdarg) or D-style (core.vararg)
     VARARGtypesafe = 2   /// T t ...) typesafe https://dlang.org/spec/function.html#typesafe_variadic_functions
                          ///   or https://dlang.org/spec/function.html#typesafe_variadic_functions
 };
+typedef unsigned char VarArg;
 
 class Type : public ASTNode
 {
@@ -132,22 +133,10 @@ public:
     MOD mod;  // modifiers MODxxxx
     char *deco;
 
-    /* These are cached values that are lazily evaluated by constOf(), immutableOf(), etc.
-     * They should not be referenced by anybody but mtype.c.
-     * They can be NULL if not lazily evaluated yet.
-     * Note that there is no "shared immutable", because that is just immutable
-     * Naked == no MOD bits
-     */
+private:
+    void* mcache;
 
-    Type *cto;          // MODconst                 ? naked version of this type : const version
-    Type *ito;          // MODimmutable             ? naked version of this type : immutable version
-    Type *sto;          // MODshared                ? naked version of this type : shared mutable version
-    Type *scto;         // MODshared | MODconst     ? naked version of this type : shared const version
-    Type *wto;          // MODwild                  ? naked version of this type : wild version
-    Type *wcto;         // MODwildconst             ? naked version of this type : wild const version
-    Type *swto;         // MODshared | MODwild      ? naked version of this type : shared wild version
-    Type *swcto;        // MODshared | MODwildconst ? naked version of this type : shared wild const version
-
+public:
     Type *pto;          // merged pointer to this type
     Type *rto;          // reference to this type
     Type *arrayof;      // array of this type
@@ -189,7 +178,6 @@ public:
     static Type *tstring;               // immutable(char)[]
     static Type *twstring;              // immutable(wchar)[]
     static Type *tdstring;              // immutable(dchar)[]
-    static Type *tvalist;               // va_list alias
     static Type *terror;                // for error recovery
     static Type *tnull;                 // for null type
 
@@ -226,7 +214,7 @@ public:
     bool equivalent(Type *t);
     // kludge for template.isType()
     DYNCAST dyncast() const { return DYNCAST_TYPE; }
-    int covariant(Type *t, StorageClass *pstc = NULL, bool fix17349 = true);
+    int covariant(Type *t, StorageClass *pstc = NULL);
     const char *toChars() const;
     char *toPrettyChars(bool QualifyTypes = false);
     static void _init();
@@ -281,6 +269,7 @@ public:
     Type *referenceTo();
     Type *arrayOf();
     Type *sarrayOf(dinteger_t dim);
+    bool hasDeprecatedAliasThis();
     Type *aliasthisOf();
     virtual Type *makeConst();
     virtual Type *makeImmutable();
@@ -292,7 +281,7 @@ public:
     virtual Type *makeSharedWildConst();
     virtual Type *makeMutable();
     virtual Dsymbol *toDsymbol(Scope *sc);
-    virtual Type *toBasetype();
+    Type *toBasetype();
     virtual bool isBaseOf(Type *t, int *poffset);
     virtual MATCH implicitConvTo(Type *to);
     virtual MATCH constConv(Type *to);
@@ -317,6 +306,8 @@ public:
     virtual bool needsCopyOrPostblit();
     virtual bool needsNested();
 
+    TypeFunction *toTypeFunction();
+
     // For eliminating dynamic_cast
     virtual TypeBasic *isTypeBasic();
     TypeError *isTypeError();
@@ -338,6 +329,8 @@ public:
     TypeTuple *isTypeTuple();
     TypeSlice *isTypeSlice();
     TypeNull *isTypeNull();
+    TypeMixin *isTypeMixin();
+    TypeTraits *isTypeTraits();
 
     void accept(Visitor *v) { v->visit(this); }
 };
@@ -345,6 +338,7 @@ public:
 class TypeError : public Type
 {
 public:
+    const char *kind();
     Type *syntaxCopy();
 
     d_uns64 size(const Loc &loc);
@@ -475,7 +469,6 @@ class TypeAArray : public TypeArray
 public:
     Type *index;                // key type
     Loc loc;
-    Scope *sc;
 
     static TypeAArray *create(Type *t, Type *index);
     const char *kind();
@@ -522,12 +515,12 @@ enum RET
     RETstack    = 2     // returned on stack
 };
 
-enum TRUST
+enum class TRUST : unsigned char
 {
-    TRUSTdefault = 0,
-    TRUSTsystem = 1,    // @system (same as TRUSTdefault)
-    TRUSTtrusted = 2,   // @trusted
-    TRUSTsafe = 3       // @safe
+    default_ = 0,
+    system = 1,    // @system (same as TRUSTdefault)
+    trusted = 2,   // @trusted
+    safe = 3       // @safe
 };
 
 enum TRUSTformat
@@ -536,13 +529,13 @@ enum TRUSTformat
     TRUSTformatSystem    // emit @system when trust == TRUSTdefault
 };
 
-enum PURE
+enum class PURE : unsigned char
 {
-    PUREimpure = 0,     // not pure at all
-    PUREfwdref = 1,     // it's pure, but not known which level yet
-    PUREweak = 2,       // no mutable globals are read or written
-    PUREconst = 3,      // parameters are values or const
-    PUREstrong = 4      // parameters are values or immutable
+    impure = 0,     // not pure at all
+    fwdref = 1,     // it's pure, but not known which level yet
+    weak = 2,       // no mutable globals are read or written
+    const_ = 3,     // parameters are values or const
+    strong = 4      // parameters are values or immutable
 };
 
 class Parameter : public ASTNode
@@ -563,7 +556,7 @@ public:
     void accept(Visitor *v) { v->visit(this); }
 
     static size_t dim(Parameters *parameters);
-    static Parameter *getNth(Parameters *parameters, d_size_t nth, d_size_t *pn = NULL);
+    static Parameter *getNth(Parameters *parameters, d_size_t nth);
     const char *toChars() const;
     bool isCovariant(bool returnByRef, const Parameter *p) const;
 };
@@ -571,6 +564,7 @@ public:
 struct ParameterList
 {
     Parameters* parameters;
+    StorageClass stc;
     VarArg varargs;
 
     size_t length();
@@ -582,25 +576,13 @@ class TypeFunction : public TypeNext
 public:
     // .next is the return type
 
-    ParameterList parameterList;     // function parameters
-
-    bool isnothrow;     // true: nothrow
-    bool isnogc;        // true: is @nogc
-    bool isproperty;    // can be called without parentheses
-    bool isref;         // true: returns a reference
-    bool isreturn;      // true: 'this' is returned by ref
-    bool isscope;       // true: 'this' is scope
-    bool isreturninferred;      // true: 'this' is return from inference
-    bool isscopeinferred; // true: 'this' is scope from inference
-    bool islive;        // is @live
-    LINK linkage;  // calling convention
-    TRUST trust;   // level of trust
-    PURE purity;   // PURExxxx
-    unsigned char iswild;   // bit0: inout on params, bit1: inout on qualifier
-    Expressions *fargs; // function arguments
-
-    int inuse;
-    bool incomplete;
+    ParameterList parameterList; // function parameters
+    LINK linkage;                // calling convention
+    unsigned funcFlags;
+    TRUST trust;                 // level of trust
+    PURE purity;                 // PURExxxx
+    char inuse;
+    Expressions *fargs;          // function arguments
 
     static TypeFunction *create(Parameters *parameters, Type *treturn, VarArg varargs, LINK linkage, StorageClass stc = 0);
     const char *kind();
@@ -613,6 +595,32 @@ public:
     Type *addStorageClass(StorageClass stc);
 
     Type *substWildTo(unsigned mod);
+
+    bool isnothrow() const;
+    void isnothrow(bool v);
+    bool isnogc() const;
+    void isnogc(bool v);
+    bool isproperty() const;
+    void isproperty(bool v);
+    bool isref() const;
+    void isref(bool v);
+    bool isreturn() const;
+    void isreturn(bool v);
+    bool isScopeQual() const;
+    void isScopeQual(bool v);
+    bool isreturninferred() const;
+    void isreturninferred(bool v);
+    bool isscopeinferred() const;
+    void isscopeinferred(bool v);
+    bool islive() const;
+    void islive(bool v);
+    bool incomplete() const;
+    void incomplete(bool v);
+    bool isInOutParam() const;
+    void isInOutParam(bool v);
+    bool isInOutQual() const;
+    void isInOutQual(bool v);
+    bool iswild() const;
 
     void accept(Visitor *v) { v->visit(this); }
 };
@@ -644,8 +652,20 @@ class TypeTraits : public Type
     /// The symbol when exp doesn't represent a type.
     Dsymbol *sym;
 
+    const char *kind();
     Type *syntaxCopy();
     d_uns64 size(const Loc &loc);
+    Dsymbol *toDsymbol(Scope *sc);
+    void accept(Visitor *v) { v->visit(this); }
+};
+
+class TypeMixin : public Type
+{
+    Loc loc;
+    Expressions *exps;
+
+    const char *kind();
+    Type *syntaxCopy();
     Dsymbol *toDsymbol(Scope *sc);
     void accept(Visitor *v) { v->visit(this); }
 };
@@ -731,6 +751,7 @@ class TypeStruct : public Type
 public:
     StructDeclaration *sym;
     AliasThisRec att;
+    bool inuse;
 
     static TypeStruct *create(StructDeclaration *sym);
     const char *kind();
@@ -782,7 +803,6 @@ public:
     bool needsNested();
     MATCH implicitConvTo(Type *to);
     MATCH constConv(Type *to);
-    Type *toBasetype();
     bool isZeroInit(const Loc &loc);
     bool hasPointers();
     bool hasVoidInitPointers();
@@ -819,6 +839,9 @@ public:
 class TypeTuple : public Type
 {
 public:
+    // 'logically immutable' cached global - don't modify (neither pointer nor pointee)!
+    static TypeTuple *empty;
+
     Parameters *arguments;      // types making up the tuple
 
     static TypeTuple *create(Parameters *arguments);
@@ -857,7 +880,6 @@ public:
 
 /**************************************************************/
 
-bool arrayTypeCompatible(Loc loc, Type *t1, Type *t2);
 bool arrayTypeCompatibleWithoutCasting(Type *t1, Type *t2);
 
 // If the type is a class or struct, returns the symbol for it, else null.

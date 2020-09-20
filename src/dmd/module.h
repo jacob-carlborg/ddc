@@ -76,6 +76,7 @@ public:
     unsigned numlines;  // number of lines in source file
     bool isHdrFile;     // if it is a header (.di) file
     bool isDocFile;     // if it is a documentation input file, not D source
+    bool hasAlwaysInlines; // contains references to functions that must be inlined
     bool isPackageFile; // if it is a package.d
     Package *pkg;       // if isPackageFile is true, the Package that contains this package.d
     Strings contentImportedFiles;  // array of files whose content was imported
@@ -101,12 +102,12 @@ public:
     Modules aimports;             // all imported modules
 
     unsigned debuglevel;        // debug level
-    Strings *debugids;      // debug identifiers
-    Strings *debugidsNot;       // forward referenced debug identifiers
+    Identifiers *debugids;      // debug identifiers
+    Identifiers *debugidsNot;   // forward referenced debug identifiers
 
     unsigned versionlevel;      // version level
-    Strings *versionids;    // version identifiers
-    Strings *versionidsNot;     // forward referenced version identifiers
+    Identifiers *versionids;    // version identifiers
+    Identifiers *versionidsNot; // forward referenced version identifiers
 
     MacroTable macrotable;      // document comment macros
     Escape *escapetable;        // document comment escapes
@@ -151,6 +152,8 @@ public:
     Symbol *stest;              // module unit test
 
     Symbol *sfilename;          // symbol for filename
+
+    void *ctfe_cov;             // stores coverage information from ctfe
 
     Module *isModule() { return this; }
     void accept(Visitor *v) { v->visit(this); }

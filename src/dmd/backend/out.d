@@ -35,6 +35,7 @@ import dmd.backend.obj;
 import dmd.backend.oper;
 import dmd.backend.outbuf;
 import dmd.backend.rtlsym;
+import dmd.backend.symtab;
 import dmd.backend.ty;
 import dmd.backend.type;
 
@@ -204,6 +205,10 @@ version (SCPP)
                 }
                 else
                 {
+                    version (SCPP)
+                        alignOffset(DATA, 2 << dt.DTalign);
+                    version (MARS)
+                        alignOffset(CDATA, 2 << dt.DTalign);
                     dt.DTabytes += objmod.data_readonly(cast(char*)dt.DTpbytes,dt.DTnbytes,&dt.DTseg);
                 }
                 break;
@@ -663,9 +668,9 @@ Symbol *out_string_literal(const(char)* str, uint len, uint sz)
             break;
 
         case 2:
-            for (int i = 0; i < len; ++i)
+            foreach (i; 0 .. len)
             {
-                const(ushort)* p = cast(const(ushort)*)str;
+                auto p = cast(const(ushort)*)str;
                 if (p[i] == 0)
                 {
                     s.Sseg = CDATA;
@@ -675,9 +680,9 @@ Symbol *out_string_literal(const(char)* str, uint len, uint sz)
             break;
 
         case 4:
-            for (int i = 0; i < len; ++i)
+            foreach (i; 0 .. len)
             {
-                const(uint)* p = cast(const(uint)*)str;
+                auto p = cast(const(uint)*)str;
                 if (p[i] == 0)
                 {
                     s.Sseg = CDATA;
@@ -964,7 +969,7 @@ void out_regcand(symtab_t *psymtab)
 {
     //printf("out_regcand()\n");
     const bool ifunc = (tybasic(funcsym_p.ty()) == TYifunc);
-    for (SYMIDX si = 0; si < psymtab.top; si++)
+    for (SYMIDX si = 0; si < psymtab.length; si++)
     {   Symbol *s = psymtab.tab[si];
 
         symbol_debug(s);
@@ -986,7 +991,7 @@ void out_regcand(symtab_t *psymtab)
 
         // Any assembler blocks make everything ambiguous
         if (b.BC == BCasm)
-            for (SYMIDX si = 0; si < psymtab.top; si++)
+            for (SYMIDX si = 0; si < psymtab.length; si++)
                 psymtab.tab[si].Sflags &= ~(SFLunambig | GTregcand);
     }
 
@@ -994,7 +999,7 @@ void out_regcand(symtab_t *psymtab)
     // address of all non-register parameters.
     if (addressOfParam)                      // if took address of a parameter
     {
-        for (SYMIDX si = 0; si < psymtab.top; si++)
+        for (SYMIDX si = 0; si < psymtab.length; si++)
             if (psymtab.tab[si].Sclass == SCparameter || psymtab.tab[si].Sclass == SCshadowreg)
                 psymtab.tab[si].Sflags &= ~(SFLunambig | GTregcand);
     }
@@ -1155,17 +1160,11 @@ version (SCPP)
 
     /* Copy local symbol table onto main one, making sure       */
     /* that the symbol numbers are adjusted accordingly */
-    //printf("f.Flocsym.top = %d\n",f.Flocsym.top);
-    uint nsymbols = f.Flocsym.top;
-    if (nsymbols > globsym.symmax)
-    {   /* Reallocate globsym.tab[]     */
-        globsym.symmax = nsymbols;
-        globsym.tab = symtab_realloc(globsym.tab, globsym.symmax);
-    }
+    //printf("f.Flocsym.length = %d\n",f.Flocsym.length);
     debug debugy && printf("appending symbols to symtab...\n");
-    assert(globsym.top == 0);
+    const nsymbols = f.Flocsym.length;
+    globsym.setLength(nsymbols);
     memcpy(&globsym.tab[0],&f.Flocsym.tab[0],nsymbols * (Symbol *).sizeof);
-    globsym.top = nsymbols;
 
     assert(startblock == null);
     if (f.Fflags & Finline)            // if keep function around
@@ -1221,15 +1220,15 @@ version (SCPP)
 }
 
     // TX86 computes parameter offsets in stackoffsets()
-    //printf("globsym.top = %d\n", globsym.top);
+    //printf("globsym.length = %d\n", globsym.length);
 
 version (SCPP)
 {
     FuncParamRegs fpr = FuncParamRegs_create(tyf);
 }
 
-    for (SYMIDX si = 0; si < globsym.top; si++)
-    {   Symbol *s = globsym.tab[si];
+    for (SYMIDX si = 0; si < globsym.length; si++)
+    {   Symbol *s = globsym[si];
 
         symbol_debug(s);
         //printf("symbol %d '%s'\n",si,s.Sident.ptr);
@@ -1304,10 +1303,8 @@ else
 
     bool addressOfParam = false;  // see if any parameters get their address taken
     bool anyasm = false;
-    numblks = 0;
     for (block *b = startblock; b; b = b.Bnext)
     {
-        numblks++;                              // redo count
         memset(&b._BLU,0,block.sizeof - block._BLU.offsetof);
         if (b.Belem)
         {   outelem(b.Belem, addressOfParam);
@@ -1336,22 +1333,22 @@ version (MARS)
     }
     PARSER = 0;
     if (eecontext.EEelem)
-    {   uint marksi = globsym.top;
-
+    {
+        const marksi = globsym.length;
         eecontext.EEin++;
         outelem(eecontext.EEelem, addressOfParam);
         eecontext.EEelem = doptelem(eecontext.EEelem,true);
         eecontext.EEin--;
         eecontext_convs(marksi);
     }
-    maxblks = 3 * numblks;              // allow for increase in # of blocks
+
     // If we took the address of one parameter, assume we took the
     // address of all non-register parameters.
     if (addressOfParam | anyasm)        // if took address of a parameter
     {
-        for (SYMIDX si = 0; si < globsym.top; si++)
-            if (anyasm || globsym.tab[si].Sclass == SCparameter)
-                globsym.tab[si].Sflags &= ~(SFLunambig | GTregcand);
+        for (SYMIDX si = 0; si < globsym.length; si++)
+            if (anyasm || globsym[si].Sclass == SCparameter)
+                globsym[si].Sflags &= ~(SFLunambig | GTregcand);
     }
 
     block_pred();                       // compute predecessors to blocks
@@ -1400,7 +1397,7 @@ version (SCPP)
     }
 }
     assert(funcsym_p == sfunc);
-    const int CSEGSAVE_DEFAULT = -10000;        // some unlikely number
+    const int CSEGSAVE_DEFAULT = -10_000;        // some unlikely number
     int csegsave = CSEGSAVE_DEFAULT;
     if (eecontext.EEcompile != 1)
     {
@@ -1555,9 +1552,9 @@ version (MARS)
     /* This is to make uplevel references to SCfastpar variables
      * from nested functions work.
      */
-    for (SYMIDX si = 0; si < globsym.top; si++)
+    for (SYMIDX si = 0; si < globsym.length; si++)
     {
-        Symbol *s = globsym.tab[si];
+        Symbol *s = globsym[si];
 
         switch (s.Sclass)
         {   case SCfastpar:
@@ -1608,9 +1605,9 @@ Ldone:
 version (SCPP)
 {
     // Free any added symbols
-    freesymtab(globsym.tab,nsymbols,globsym.top);
+    freesymtab(globsym.tab,nsymbols,globsym.length);
 }
-    globsym.top = 0;
+    globsym.length = 0;
 
     //printf("done with writefunc()\n");
     //dfo.dtor();       // save allocation for next time

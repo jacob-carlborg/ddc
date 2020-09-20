@@ -49,6 +49,7 @@ import dmd.mtype;
 import dmd.nogc;
 import dmd.opover;
 import dmd.root.outbuffer;
+import dmd.root.rmem;
 import dmd.root.string;
 import dmd.semantic2;
 import dmd.sideeffect;
@@ -57,6 +58,7 @@ import dmd.target;
 import dmd.tokens;
 import dmd.typesem;
 import dmd.visitor;
+import dmd.compiler;
 
 /*****************************************
  * CTFE requires FuncDeclaration::labtab for the interpretation.
@@ -115,7 +117,7 @@ private Expression checkAssignmentAsCondition(Expression e)
     if (ec.op == TOK.assign)
     {
         ec.error("assignment cannot be used as a condition, perhaps `==` was meant?");
-        return new ErrorExp();
+        return ErrorExp.get();
     }
     return e;
 }
@@ -123,8 +125,15 @@ private Expression checkAssignmentAsCondition(Expression e)
 // Performs semantic analysis in Statement AST nodes
 extern(C++) Statement statementSemantic(Statement s, Scope* sc)
 {
+    version (CallbackAPI)
+        Compiler.onStatementSemanticStart(s, sc);
+
     scope v = new StatementSemanticVisitor(sc);
     s.accept(v);
+
+    version (CallbackAPI)
+        Compiler.onStatementSemanticDone(s, sc);
+
     return v.result;
 }
 
@@ -179,14 +188,14 @@ private extern (C++) final class StatementSemanticVisitor : Visitor
             s.exp = resolveProperties(sc, s.exp);
             s.exp = s.exp.addDtorHook(sc);
             if (checkNonAssignmentArrayOp(s.exp))
-                s.exp = new ErrorExp();
+                s.exp = ErrorExp.get();
             if (auto f = isFuncAddress(s.exp))
             {
                 if (f.checkForwardRef(s.exp.loc))
-                    s.exp = new ErrorExp();
+                    s.exp = ErrorExp.get();
             }
             if (discardValue(s.exp))
-                s.exp = new ErrorExp();
+                s.exp = ErrorExp.get();
 
             s.exp = s.exp.optimize(WANTvalue);
             s.exp = checkGC(sc, s.exp);
@@ -508,7 +517,7 @@ private extern (C++) final class StatementSemanticVisitor : Visitor
         ds.condition = ds.condition.expressionSemantic(sc);
         ds.condition = resolveProperties(sc, ds.condition);
         if (checkNonAssignmentArrayOp(ds.condition))
-            ds.condition = new ErrorExp();
+            ds.condition = ErrorExp.get();
         ds.condition = ds.condition.optimize(WANTvalue);
         ds.condition = checkGC(sc, ds.condition);
 
@@ -581,7 +590,7 @@ private extern (C++) final class StatementSemanticVisitor : Visitor
             fs.condition = fs.condition.expressionSemantic(sc);
             fs.condition = resolveProperties(sc, fs.condition);
             if (checkNonAssignmentArrayOp(fs.condition))
-                fs.condition = new ErrorExp();
+                fs.condition = ErrorExp.get();
             fs.condition = fs.condition.optimize(WANTvalue);
             fs.condition = checkGC(sc, fs.condition);
 
@@ -593,7 +602,7 @@ private extern (C++) final class StatementSemanticVisitor : Visitor
             fs.increment = fs.increment.expressionSemantic(sc);
             fs.increment = resolveProperties(sc, fs.increment);
             if (checkNonAssignmentArrayOp(fs.increment))
-                fs.increment = new ErrorExp();
+                fs.increment = ErrorExp.get();
             fs.increment = fs.increment.optimize(WANTvalue);
             fs.increment = checkGC(sc, fs.increment);
         }
@@ -1138,8 +1147,8 @@ private extern (C++) final class StatementSemanticVisitor : Visitor
             if (foundMismatch && dim != foreachParamCount)
             {
                 const(char)* plural = foreachParamCount > 1 ? "s" : "";
-                fs.error("cannot infer argument types, expected %d argument%s, not %d",
-                    foreachParamCount, plural, dim);
+                fs.error("cannot infer argument types, expected %llu argument%s, not %llu",
+                    cast(ulong) foreachParamCount, plural, cast(ulong) dim);
             }
             else
                 fs.error("cannot uniquely infer `foreach` argument types");
@@ -1251,63 +1260,61 @@ private extern (C++) final class StatementSemanticVisitor : Visitor
                     }
                 }
 
-                foreach (i; 0 .. dim)
+                // Declare the key
+                if (dim == 2)
                 {
-                    // Declare parameters
-                    Parameter p = (*fs.parameters)[i];
-                    VarDeclaration var;
+                    Parameter p = (*fs.parameters)[0];
+                    auto var = new VarDeclaration(loc, p.type.mutableOf(), Identifier.generateId("__key"), null);
+                    var.storage_class |= STC.temp | STC.foreach_;
+                    if (var.storage_class & (STC.ref_ | STC.out_))
+                        var.storage_class |= STC.nodtor;
 
-                    if (dim == 2 && i == 0)
+                    fs.key = var;
+                    if (p.storageClass & STC.ref_)
                     {
-                        var = new VarDeclaration(loc, p.type.mutableOf(), Identifier.generateId("__key"), null);
-                        var.storage_class |= STC.temp | STC.foreach_;
-                        if (var.storage_class & (STC.ref_ | STC.out_))
-                            var.storage_class |= STC.nodtor;
-
-                        fs.key = var;
-                        if (p.storageClass & STC.ref_)
+                        if (var.type.constConv(p.type) <= MATCH.nomatch)
                         {
-                            if (var.type.constConv(p.type) <= MATCH.nomatch)
-                            {
-                                fs.error("key type mismatch, `%s` to `ref %s`",
-                                    var.type.toChars(), p.type.toChars());
-                                goto case Terror;
-                            }
-                        }
-                        if (tab.ty == Tsarray)
-                        {
-                            TypeSArray ta = cast(TypeSArray)tab;
-                            IntRange dimrange = getIntRange(ta.dim);
-                            if (!IntRange.fromType(var.type).contains(dimrange))
-                            {
-                                fs.error("index type `%s` cannot cover index range 0..%llu",
-                                    p.type.toChars(), ta.dim.toInteger());
-                                goto case Terror;
-                            }
-                            fs.key.range = new IntRange(SignExtendedNumber(0), dimrange.imax);
+                            fs.error("key type mismatch, `%s` to `ref %s`",
+                                     var.type.toChars(), p.type.toChars());
+                            goto case Terror;
                         }
                     }
-                    else
+                    if (tab.ty == Tsarray)
                     {
-                        var = new VarDeclaration(loc, p.type, p.ident, null);
-                        var.storage_class |= STC.foreach_;
-                        var.storage_class |= p.storageClass & (STC.in_ | STC.out_ | STC.ref_ | STC.TYPECTOR);
-                        if (var.storage_class & (STC.ref_ | STC.out_))
-                            var.storage_class |= STC.nodtor;
-
-                        fs.value = var;
-                        if (var.storage_class & STC.ref_)
+                        TypeSArray ta = cast(TypeSArray)tab;
+                        IntRange dimrange = getIntRange(ta.dim);
+                        // https://issues.dlang.org/show_bug.cgi?id=12504
+                        dimrange.imax = SignExtendedNumber(dimrange.imax.value-1);
+                        if (!IntRange.fromType(var.type).contains(dimrange))
                         {
-                            if (fs.aggr.checkModifiable(sc2, 1) == Modifiable.initialization)
-                                var.storage_class |= STC.ctorinit;
+                            fs.error("index type `%s` cannot cover index range 0..%llu",
+                                     p.type.toChars(), ta.dim.toInteger());
+                            goto case Terror;
+                        }
+                        fs.key.range = new IntRange(SignExtendedNumber(0), dimrange.imax);
+                    }
+                }
+                // Now declare the value
+                {
+                    Parameter p = (*fs.parameters)[dim - 1];
+                    auto var = new VarDeclaration(loc, p.type, p.ident, null);
+                    var.storage_class |= STC.foreach_;
+                    var.storage_class |= p.storageClass & (STC.IOR | STC.TYPECTOR);
+                    if (var.storage_class & (STC.ref_ | STC.out_))
+                        var.storage_class |= STC.nodtor;
 
-                            Type t = tab.nextOf();
-                            if (t.constConv(p.type) <= MATCH.nomatch)
-                            {
-                                fs.error("argument type mismatch, `%s` to `ref %s`",
-                                    t.toChars(), p.type.toChars());
-                                goto case Terror;
-                            }
+                    fs.value = var;
+                    if (var.storage_class & STC.ref_)
+                    {
+                        if (fs.aggr.checkModifiable(sc2, 1) == Modifiable.initialization)
+                            var.storage_class |= STC.ctorinit;
+
+                        Type t = tab.nextOf();
+                        if (t.constConv(p.type) <= MATCH.nomatch)
+                        {
+                            fs.error("argument type mismatch, `%s` to `ref %s`",
+                                     t.toChars(), p.type.toChars());
+                            goto case Terror;
                         }
                     }
                 }
@@ -1551,7 +1558,7 @@ private extern (C++) final class StatementSemanticVisitor : Visitor
                     auto p = (*fs.parameters)[0];
                     auto ve = new VarDeclaration(loc, p.type, p.ident, new ExpInitializer(loc, einit));
                     ve.storage_class |= STC.foreach_;
-                    ve.storage_class |= p.storageClass & (STC.in_ | STC.out_ | STC.ref_ | STC.TYPECTOR);
+                    ve.storage_class |= p.storageClass & (STC.IOR | STC.TYPECTOR);
 
                     if (ignoreRef)
                         ve.storage_class &= ~STC.ref_;
@@ -1582,8 +1589,8 @@ private extern (C++) final class StatementSemanticVisitor : Visitor
                     if (exps.dim != dim)
                     {
                         const(char)* plural = exps.dim > 1 ? "s" : "";
-                        fs.error("cannot infer argument types, expected %d argument%s, not %d",
-                            exps.dim, plural, dim);
+                        fs.error("cannot infer argument types, expected %llu argument%s, not %llu",
+                            cast(ulong) exps.dim, plural, cast(ulong) dim);
                         goto case Terror;
                     }
 
@@ -1737,7 +1744,7 @@ private extern (C++) final class StatementSemanticVisitor : Visitor
                     {
                         auto params = new Parameters();
                         params.push(new Parameter(0, Type.tvoid.pointerTo(), null, null, null));
-                        params.push(new Parameter(STC.in_, Type.tsize_t, null, null, null));
+                        params.push(new Parameter(STC.const_, Type.tsize_t, null, null, null));
                         auto dgparams = new Parameters();
                         dgparams.push(new Parameter(0, Type.tvoidptr, null, null, null));
                         if (dim == 2)
@@ -2240,7 +2247,7 @@ else
             ifs.condition = ifs.condition.addDtorHook(scd);
         }
         if (checkNonAssignmentArrayOp(ifs.condition))
-            ifs.condition = new ErrorExp();
+            ifs.condition = ErrorExp.get();
         ifs.condition = checkGC(scd, ifs.condition);
 
         // Convert to boolean after declaring prm so this works:
@@ -2529,7 +2536,7 @@ else
             }
         }
         if (checkNonAssignmentArrayOp(ss.condition))
-            ss.condition = new ErrorExp();
+            ss.condition = ErrorExp.get();
         ss.condition = ss.condition.optimize(WANTvalue);
         ss.condition = checkGC(sc, ss.condition);
         if (ss.condition.op == TOK.error)
@@ -2636,7 +2643,7 @@ else
                     /* Rewrite as an assert(0) and let e2ir generate
                      * the call to the C assert failure function
                      */
-                    s = new ExpStatement(ss.loc, new AssertExp(ss.loc, new IntegerExp(ss.loc, 0, Type.tint32)));
+                    s = new ExpStatement(ss.loc, new AssertExp(ss.loc, IntegerExp.literal!0));
                 }
                 else
                 {
@@ -3150,7 +3157,9 @@ else
                 rs.exp = inferType(rs.exp, fld.treq.nextOf().nextOf());
 
             rs.exp = rs.exp.expressionSemantic(sc);
-            rs.exp.checkSharedAccess(sc);
+            // If we're returning by ref, allow the expression to be `shared`
+            const returnSharedRef = (tf.isref && (fd.inferRetType || tret.isShared()));
+            rs.exp.checkSharedAccess(sc, returnSharedRef);
 
             // for static alias this: https://issues.dlang.org/show_bug.cgi?id=17684
             if (rs.exp.op == TOK.type)
@@ -3158,14 +3167,14 @@ else
 
             rs.exp = resolveProperties(sc, rs.exp);
             if (rs.exp.checkType())
-                rs.exp = new ErrorExp();
+                rs.exp = ErrorExp.get();
             if (auto f = isFuncAddress(rs.exp))
             {
                 if (fd.inferRetType && f.checkForwardRef(rs.exp.loc))
-                    rs.exp = new ErrorExp();
+                    rs.exp = ErrorExp.get();
             }
             if (checkNonAssignmentArrayOp(rs.exp))
-                rs.exp = new ErrorExp();
+                rs.exp = ErrorExp.get();
 
             // Extract side-effect part
             rs.exp = Expression.extractLast(rs.exp, e0);
@@ -3248,11 +3257,19 @@ else
                  * https://dlang.org/spec/function.html#auto-ref-functions
                  */
 
-                void turnOffRef()
+                void turnOffRef(scope void delegate() supplemental)
                 {
                     tf.isref = false;    // return by value
                     tf.isreturn = false; // ignore 'return' attribute, whether explicit or inferred
                     fd.storage_class &= ~STC.return_;
+
+                    // If we previously assumed the function could be ref when
+                    // checking for `shared`, make sure we were right
+                    if (global.params.noSharedAccess && rs.exp.type.isShared())
+                    {
+                        fd.error("function returns `shared` but cannot be inferred `ref`");
+                        supplemental();
+                    }
                 }
 
                 if (rs.exp.isLvalue())
@@ -3260,12 +3277,17 @@ else
                     /* May return by ref
                      */
                     if (checkReturnEscapeRef(sc, rs.exp, true))
-                        turnOffRef();
+                        turnOffRef(() { checkReturnEscapeRef(sc, rs.exp, false); });
                     else if (!rs.exp.type.constConv(tf.next))
-                        turnOffRef();
+                        turnOffRef(
+                            () => rs.loc.errorSupplemental("cannot implicitly convert `%s` of type `%s` to `%s`",
+                                      rs.exp.toChars(), rs.exp.type.toChars(), tf.next.toChars())
+                        );
                 }
                 else
-                    turnOffRef();
+                    turnOffRef(
+                        () => rs.loc.errorSupplemental("return value `%s` is not an lvalue", rs.exp.toChars())
+                    );
 
                 /* The "refness" is determined by all of return statements.
                  * This means:
@@ -3455,7 +3477,7 @@ else
         {
             if (sc.os && sc.os.tok != TOK.onScopeFailure)
             {
-                bs.error("`break` is not inside `%s` bodies", Token.toChars(sc.os.tok));
+                bs.error("`break` is not allowed inside `%s` bodies", Token.toChars(sc.os.tok));
             }
             else if (sc.fes)
             {
@@ -3542,7 +3564,7 @@ else
         {
             if (sc.os && sc.os.tok != TOK.onScopeFailure)
             {
-                cs.error("`continue` is not inside `%s` bodies", Token.toChars(sc.os.tok));
+                cs.error("`continue` is not allowed inside `%s` bodies", Token.toChars(sc.os.tok));
             }
             else if (sc.fes)
             {
@@ -4129,14 +4151,32 @@ else
         /* https://dlang.org/spec/statement.html#asm
          */
 
+        //printf("AsmStatement()::semantic()\n");
         result = asmSemantic(s, sc);
     }
 
     override void visit(CompoundAsmStatement cas)
     {
+        //printf("CompoundAsmStatement()::semantic()\n");
         // Apply postfix attributes of the asm block to each statement.
         sc = sc.push();
         sc.stc |= cas.stc;
+
+        /* Go through the statements twice, first to declare any labels,
+         * second for anything else.
+         */
+
+        foreach (ref s; *cas.statements)
+        {
+            if (s)
+            {
+                if (auto ls = s.isLabelStatement())
+                {
+                    sc.func.searchLabel(ls.ident);
+                }
+            }
+        }
+
         foreach (ref s; *cas.statements)
         {
             s = s ? s.statementSemantic(sc) : null;
@@ -4171,7 +4211,7 @@ else
                 if (!_alias)
                     _alias = name;
 
-                auto tname = new TypeIdentifier(s.loc, name);
+                auto tname = Pool!TypeIdentifier.make(s.loc, name);
                 auto ad = new AliasDeclaration(s.loc, _alias, tname);
                 ad._import = s;
                 s.aliasdecls.push(ad);
@@ -4277,7 +4317,7 @@ void catchSemantic(Catch c, Scope* sc)
         // DIP1008 requires destruction of the Throwable, even if the user didn't specify an identifier
         auto ident = c.ident;
         if (!ident && global.params.ehnogc)
-            ident = Identifier.anonymous();
+            ident = Identifier.generateAnonymousId("var");
 
         if (ident)
         {

@@ -28,6 +28,7 @@ import dmd.backend.dlist;
 import dmd.backend.el;
 import dmd.backend.el : elem;
 import dmd.backend.mem;
+import dmd.backend.symtab;
 import dmd.backend.type;
 //import dmd.backend.obj;
 
@@ -76,8 +77,6 @@ extern __gshared
     char[SCMAX] sytab;
 
     extern (C) /*volatile*/ int controlc_saw;    // a control C was seen
-    uint maxblks;                   // array max for all block stuff
-    uint numblks;                   // number of basic blocks (if optimized)
     block* startblock;              // beginning block of function
 
     Barray!(block*) dfo;            // array of depth first order
@@ -112,7 +111,7 @@ else
     const(char)* cpp_mangle(Symbol* s) { return &s.Sident[0]; }
 
 // ee.c
-void eecontext_convs(uint marksi);
+void eecontext_convs(SYMIDX marksi);
 void eecontext_parse();
 
 // exp2.c
@@ -149,7 +148,7 @@ version (Posix)
 void* util_malloc(uint n,uint size) { return mem_malloc(n * size); }
 void* util_calloc(uint n,uint size) { return mem_calloc(n * size); }
 void util_free(void *p) { mem_free(p); }
-void *util_realloc(void *oldp,uint n,uint size) { return mem_realloc(oldp, n * size); }
+void *util_realloc(void *oldp,size_t n,size_t size) { return mem_realloc(oldp, n * size); }
 //#define parc_malloc     mem_malloc
 //#define parc_calloc     mem_calloc
 //#define parc_realloc    mem_realloc
@@ -161,7 +160,7 @@ else
 void *util_malloc(uint n,uint size);
 void *util_calloc(uint n,uint size);
 void util_free(void *p);
-void *util_realloc(void *oldp,uint n,uint size);
+void *util_realloc(void *oldp,size_t n,size_t size);
 void *parc_malloc(size_t len);
 void *parc_calloc(size_t len);
 void *parc_realloc(void *oldp,size_t len);
@@ -322,10 +321,6 @@ extern __gshared
 }
 
 /* Symbol.c */
-extern (C) Symbol **symtab_realloc(Symbol **tab, size_t symmax);
-Symbol **symtab_malloc(size_t symmax);
-Symbol **symtab_calloc(size_t symmax);
-void symtab_free(Symbol **tab);
 //#if TERMCODE
 //void symbol_keep(Symbol *s);
 //#else
@@ -359,7 +354,7 @@ baseclass_t *baseclass_find_nest(baseclass_t *bm,Classsym *sbase);
 int baseclass_nitems(baseclass_t *b);
 void symbol_free(Symbol *s);
 SYMIDX symbol_add(Symbol *s);
-SYMIDX symbol_add(symtab_t*, Symbol *s);
+SYMIDX symbol_add(ref symtab_t, Symbol *s);
 SYMIDX symbol_insert(symtab_t*, Symbol *s, SYMIDX n);
 void freesymtab(Symbol **stab, SYMIDX n1, SYMIDX n2);
 Symbol *symbol_copy(Symbol *s);
@@ -458,7 +453,7 @@ int elemisone(elem *);
 /* msc.c */
 targ_size_t size(tym_t);
 Symbol *symboldata(targ_size_t offset,tym_t ty);
-bool dom(block *A , block *B);
+bool dom(const block* A, const block* B);
 uint revop(uint op);
 uint invrel(uint op);
 int binary(const(char)* p, const(char)** tab, int high);

@@ -53,7 +53,7 @@ enum
     CHECKACTION_context   // call D assert with the error context on failure
 };
 
-enum CPU
+enum class CPU
 {
     x87,
     mmx,
@@ -89,6 +89,14 @@ enum CppStdRevision
     CppStdRevisionCpp17 = 201703
 };
 
+/// Configuration for the C++ header generator
+enum class CxxHeaderMode
+{
+    none,   /// Don't generate headers
+    silent, /// Generate headers
+    verbose /// Generate headers and add comments for hidden declarations
+};
+
 // Put command line switches in here
 struct Param
 {
@@ -104,6 +112,8 @@ struct Param
     bool vcg_ast;       // write-out codegen-ast
     bool showColumns;   // print character (column) numbers in diagnostics
     bool vtls;          // identify thread local variables
+    bool vtemplates;    // collect and list statistics on template instantiations
+    bool vtemplatesListInstances; // collect and list statistics on template instantiations origins
     bool vgc;           // identify gc usage
     bool vfield;        // identify non-mutable field variables
     bool vcomplex;      // identify complex/imaginary type usage
@@ -143,6 +153,7 @@ struct Param
     bool useTypeInfo;   // generate runtime type information
     bool useExceptions; // support exception handling
     bool noSharedAccess; // read/write access to shared memory objects
+    bool previewIn;     // `in` means `scope const`, perhaps `ref`, accepts rvalues
     bool betterC;       // be a "better C" compiler; no dependency on D runtime
     bool addMain;       // add a default main() function
     bool allInst;       // generate code for all template instantiations
@@ -169,6 +180,7 @@ struct Param
     bool revertUsage;       // print help on -revert switch
     bool previewUsage;      // print help on -preview switch
     bool externStdUsage;    // print help on -extern-std switch
+    bool hcUsage;           // print help on -HC switch
     bool logo;              // print logo;
 
     CPU cpu;                // CPU instruction set to target
@@ -203,7 +215,7 @@ struct Param
     DString hdrname;       // write 'header' file to docname
     bool hdrStripPlainFunctions; // strip the bodies of plain (non-template) functions
 
-    bool doCxxHdrGeneration;  // write 'Cxx header' file
+    CxxHeaderMode doCxxHdrGeneration;  // write 'Cxx header' file
     DString cxxhdrdir;        // write 'header' file to docdir directory
     DString cxxhdrname;       // write 'header' file to docname
 
@@ -278,7 +290,6 @@ struct Global
     Array<const char *> *path;        // Array of char*'s which form the import lookup path
     Array<const char *> *filePath;    // Array of char*'s which form the file import lookup path
 
-    DString version;         // Compiler version string
     DString vendor;          // Compiler backend name
 
     Param params;
@@ -314,6 +325,11 @@ struct Global
     Returns: the version as the number that would be returned for __VERSION__
     */
     unsigned versionNumber();
+
+    /**
+    Returns: the compiler version string.
+    */
+    const char * versionChars();
 };
 
 extern Global global;

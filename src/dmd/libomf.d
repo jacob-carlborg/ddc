@@ -67,7 +67,7 @@ final class LibOMF : Library
 
     extern (D) this()
     {
-        tab._init(14000);
+        tab._init(14_000);
     }
 
     /***************************************
@@ -86,7 +86,7 @@ final class LibOMF : Library
 
         void corrupt(int reason)
         {
-            error("corrupt OMF object module %s %d",
+            error("corrupt OMF object module %.*s %d",
                   cast(int)module_name.length, module_name.ptr, reason);
         }
 

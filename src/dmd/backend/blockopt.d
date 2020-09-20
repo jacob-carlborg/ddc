@@ -1,12 +1,12 @@
 /**
- * Compiler implementation of the
- * $(LINK2 http://www.dlang.org, D programming language).
+ * Manipulating basic blocks and their edges.
  *
  * Copyright:   Copyright (C) 1986-1997 by Symantec
  *              Copyright (C) 2000-2020 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/backend/blockopt.d, backend/blockopt.d)
+ * Documentation:  https://dlang.org/phobos/dmd_backend_blockopt.html
  * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/backend/blockopt.d
  */
 
@@ -70,13 +70,12 @@ extern (C) void mem_free(void*); // tk/mem.c
 alias MEM_PH_FREE = mem_free;
 
 version (HTOD)
-    void *util_realloc(void* p, uint n, uint size);
+    void *util_realloc(void* p, size_t n, size_t size);
 else
     import dmd.backend.gflow : util_realloc;
 
 __gshared
 {
-    uint numblks;           // number of basic blocks in current function
     block *startblock;      // beginning block of function
                             // (can have no predecessors)
 
@@ -163,13 +162,13 @@ else
 void block_next(int bc,block *bn)
 {
     curblock.BC = cast(ubyte) bc;
-    curblock.Bsymend = globsym.top;
+    curblock.Bsymend = globsym.length;
     block_last = curblock;
     if (!bn)
         bn = block_calloc_i();
     curblock.Bnext = bn;                     // next block
     curblock = curblock.Bnext;               // new current block
-    curblock.Bsymstart = globsym.top;
+    curblock.Bsymstart = globsym.length;
     curblock.Btry = pstate.STbtry;
 }
 
@@ -232,20 +231,18 @@ void block_goto(block *bgoto,block *bnew)
 
 /**********************************
  * Replace block numbers with block pointers.
- * Also compute numblks and maxblks.
  */
 
 void block_ptr()
 {
     //printf("block_ptr()\n");
 
-    numblks = 0;
+    uint numblks = 0;
     for (block *b = startblock; b; b = b.Bnext)       /* for each block        */
     {
         b.Bblknum = numblks;
         numblks++;
     }
-    maxblks = 3 * numblks;              /* allow for increase in # of blocks */
 }
 
 /*******************************
@@ -606,7 +603,7 @@ void block_initvar(Symbol *s)
 
 void block_endfunc(int flag)
 {
-    curblock.Bsymend = globsym.top;
+    curblock.Bsymend = globsym.length;
     curblock.Bendscope = curblock;
     if (flag)
     {
@@ -631,8 +628,8 @@ void blockopt(int iter)
         blassertsplit();                // only need this once
 
         int iterationLimit = 200;
-        if (iterationLimit < numblks)
-            iterationLimit = numblks;
+        if (iterationLimit < dfo.length)
+            iterationLimit = cast(int)dfo.length;
         int count = 0;
         do
         {
@@ -645,6 +642,7 @@ void blockopt(int iter)
             bltailmerge();              // do tail merging
             brtailrecursion();          // do tail recursion
             brcombine();                // convert graph to expressions
+            blexit();
             if (iter >= 2)
                 brmin();                // minimize branching
             do
@@ -1138,14 +1136,8 @@ void compdfo(ref Barray!(block*) dfo, block* startblock)
     debug if (debugc) printf("compdfo()\n");
     assert(OPTIMIZER);
     block_clearvisit();
-    debug
-    {
-        if (maxblks == 0 || maxblks < numblks)
-            printf("maxblks = %d, numblks = %d\n",maxblks,numblks);
-    }
-    assert(maxblks && maxblks >= numblks);
     debug assert(!PARSER);
-    dfo.setLength(maxblks);
+    dfo.setLength(0);
 
     /******************************
      * Add b's successors to dfo[], then b
@@ -1188,8 +1180,6 @@ void compdfo(ref Barray!(block*) dfo, block* startblock)
             b.Bdfoidx = cast(uint)j;
     }
 
-    assert(dfo.length <= numblks);
-
     static if(0)
     {
         foreach (i, b; dfo[])
@@ -1205,18 +1195,6 @@ void compdfo(ref Barray!(block*) dfo, block* startblock)
 
 private void elimblks()
 {
-    debug
-    {
-        if (OPTIMIZER)
-        {
-            int n = 0;
-            for (block *b = startblock; b; b = b.Bnext)
-                  n++;
-            //printf("1 n = %d, numblks = %d, dfo.length = %d\n",n,numblks,dfo.length);
-            assert(numblks == n);
-        }
-    }
-
     debug if (debugc) printf("elimblks()\n");
     block *bf = null;
     block *b;
@@ -1253,11 +1231,9 @@ private void elimblks()
     {
         b = bf.Bnext;
         block_free(bf);
-        numblks--;
     }
 
     debug if (debugc) printf("elimblks done\n");
-    assert(!OPTIMIZER || numblks == dfo.length);
 }
 
 /**********************************
@@ -1352,7 +1328,6 @@ private int mergeblks()
                     startblock = bL2;   // new start
 
                     block_free(b);
-                    numblks--;
                     break;              // dfo[] is now invalid
                 }
             }
@@ -1577,7 +1552,6 @@ private void blreturn()
                 debug if (debugc)
                     printf("blreturn: splitting block B%d\n",b.Bdfoidx);
 
-                numblks++;
                 block *bn = block_calloc();
                 bn.BC = BCret;
                 bn.Bnext = b.Bnext;
@@ -1599,10 +1573,26 @@ private void blreturn()
 }
 
 /*****************************************
- * Convert expression into a list.
- * Construct the list in reverse, that is, so that the right-most
- * expression occurs first in the list.
+ * Convert comma-expressions into an array of expressions.
  */
+
+extern (D)
+private void bl_enlist2(ref Barray!(elem*) elems, elem* e)
+{
+    if (e)
+    {
+        elem_debug(e);
+        if (e.Eoper == OPcomma)
+        {
+            bl_enlist2(elems, e.EV.E1);
+            bl_enlist2(elems, e.EV.E2);
+            e.EV.E1 = e.EV.E2 = null;
+            el_free(e);
+        }
+        else
+            elems.push(e);
+    }
+}
 
 private list_t bl_enlist(elem *e)
 {
@@ -1634,6 +1624,17 @@ private list_t bl_enlist(elem *e)
 /*****************************************
  * Take a list of expressions and convert it back into an expression tree.
  */
+
+extern (D)
+private elem* bl_delist2(elem*[] elems)
+{
+    elem* result = null;
+    foreach (e; elems)
+    {
+        result = el_combine(result, e);
+    }
+    return result;
+}
 
 private elem * bl_delist(list_t el)
 {
@@ -1710,7 +1711,6 @@ private void bltailmerge()
                     debug if (debugc)
                         printf("tail merging: %p and %p\n", b, bn);
 
-                    numblks++;
                     block *bnew = block_calloc();
                     bnew.Bnext = bn.Bnext;
                     bnew.BC = b.BC;
@@ -1928,11 +1928,74 @@ private void brtailrecursion()
             )
            )
         {
-            if (el_anyframeptr(*pe))
+            if (el_anyframeptr(*pe))    // if any OPframeptr's
                 return;
-            while ((*pe).Eoper == OPcomma)
-                pe = &(*pe).EV.E2;
+
+            static elem** skipCommas(elem** pe)
+            {
+                while ((*pe).Eoper == OPcomma)
+                    pe = &(*pe).EV.E2;
+                return pe;
+            }
+
+            pe = skipCommas(pe);
+
             elem *e = *pe;
+
+            static bool isCandidate(elem* e)
+            {
+                e = *skipCommas(&e);
+                if (e.Eoper == OPcond)
+                    return isCandidate(e.EV.E2.EV.E1) || isCandidate(e.EV.E2.EV.E2);
+
+                return OTcall(e.Eoper) &&
+                       e.EV.E1.Eoper == OPvar &&
+                       e.EV.E1.EV.Vsym == funcsym_p;
+            }
+
+            if (e.Eoper == OPcond &&
+                (isCandidate(e.EV.E2.EV.E1) || isCandidate(e.EV.E2.EV.E2)))
+            {
+                /* Split OPcond into a BCiftrue block and two return blocks
+                 */
+                block* b1 = block_calloc();
+                block* b2 = block_calloc();
+
+                b1.Belem = e.EV.E2.EV.E1;
+                e.EV.E2.EV.E1 = null;
+
+                b2.Belem = e.EV.E2.EV.E2;
+                e.EV.E2.EV.E2 = null;
+
+                *pe = e.EV.E1;
+                e.EV.E1 = null;
+                el_free(e);
+
+                if (b.BC == BCgoto)
+                {
+                    list_subtract(&b.Bsucc, bn);
+                    list_subtract(&bn.Bpred, b);
+                    list_append(&b1.Bsucc, bn);
+                    list_append(&bn.Bpred, b1);
+                    list_append(&b2.Bsucc, bn);
+                    list_append(&bn.Bpred, b2);
+                }
+
+                list_append(&b.Bsucc, b1);
+                list_append(&b1.Bpred, b);
+                list_append(&b.Bsucc, b2);
+                list_append(&b2.Bpred, b);
+
+                b1.BC = b.BC;
+                b2.BC = b.BC;
+                b.BC = BCiftrue;
+
+                b2.Bnext = b.Bnext;
+                b1.Bnext = b2;
+                b.Bnext = b1;
+                continue;
+            }
+
             if (OTcall(e.Eoper) &&
                 e.EV.E1.Eoper == OPvar &&
                 e.EV.E1.EV.Vsym == funcsym_p)
@@ -1965,7 +2028,6 @@ private void brtailrecursion()
 
                 // Create a new startblock, bs, because startblock cannot
                 // have predecessors.
-                numblks++;
                 block *bs = block_calloc();
                 bs.BC = BCgoto;
                 bs.Bnext = startblock;
@@ -1975,7 +2037,6 @@ private void brtailrecursion()
 
                 debug if (debugc) printf("tail recursion\n");
                 go.changes++;
-                return;
             }
         }
     }
@@ -2005,8 +2066,8 @@ private elem * assignparams(elem **pe,int *psi,elem **pe2)
         int si = *psi;
         type *t;
 
-        assert(si < globsym.top);
-        Symbol *sp = globsym.tab[si];
+        assert(si < globsym.length);
+        Symbol *sp = globsym[si];
         Symbol *s = symbol_genauto(sp.Stype);
         s.Sfl = FLauto;
         int op = OPeq;
@@ -2201,6 +2262,8 @@ private int el_anyframeptr(elem *e)
 
 private void blassertsplit()
 {
+    debug if (debugc) printf("blassertsplit()\n");
+    Barray!(elem*) elems;
     for (block *b = startblock; b; b = b.Bnext)
     {
         /* Not sure of effect of jumping out of a try block
@@ -2211,7 +2274,9 @@ private void blassertsplit()
         if (b.BC == BCexit)
             continue;
 
-        list_t bel = list_reverse(bl_enlist(b.Belem));
+        elems.reset();
+        bl_enlist2(elems, b.Belem);
+        auto earray = elems[];
     L1:
         int dctor = 0;
 
@@ -2231,18 +2296,16 @@ private void blassertsplit()
                     continue;
                 }
                 else if (e.Eoper == OPdctor)
-                ++dctor;
+                    ++dctor;
                 else if (e.Eoper == OPddtor)
-                --dctor;
+                    --dctor;
                 break;
             }
             return dctor;
         }
 
-        foreach (el; ListRange(bel))
+        foreach (i, e; earray)
         {
-            elem *e = list_elem(el);
-
             if (!(dctor == 0 &&   // don't split block between a dctor..ddtor pair
                 e.Eoper == OPoror && e.EV.E2.Eoper == OPcall && e.EV.E2.EV.E1.Eoper == OPvar))
             {
@@ -2250,7 +2313,6 @@ private void blassertsplit()
                 continue;
             }
             Symbol *f = e.EV.E2.EV.E1.EV.Vsym;
-
             if (!(f.Sflags & SFLexit))
             {
                 accumDctor(e);
@@ -2264,8 +2326,6 @@ private void blassertsplit()
             }
 
             // Create exit block
-            ++numblks;
-            maxblks += 3;
             block *bexit = block_calloc();
             bexit.BC = BCexit;
             bexit.Belem = e.EV.E2;
@@ -2283,23 +2343,20 @@ private void blassertsplit()
                 bx = bxn;
             }
 
-            el.ptr = cast(void *)e.EV.E1;
+            earray[i] = e.EV.E1;
             e.EV.E1 = null;
             e.EV.E2 = null;
             el_free(e);
 
             /* Split b into two blocks, [b,b2]
              */
-            ++numblks;
-            maxblks += 3;
             block *b2 = block_calloc();
             b2.Bnext = b.Bnext;
             b.Bnext = b2;
             b2.BC = b.BC;
             b2.BS = b.BS;
-            list_t bex = list_next(el);
-            el.next = null;
-            b.Belem = bl_delist(list_reverse(bel));
+
+            b.Belem = bl_delist2(earray[0 .. i + 1]);
 
             /* Transfer successors of b to b2.
              * Fix up predecessors of successors to b2 to point to b2 instead of b
@@ -2324,12 +2381,93 @@ private void blassertsplit()
             list_append(&bexit.Bpred, b);
 
             b = b2;
-            bel = bex;  // remainder of expression list goes into b2
+            earray = earray[i + 1 .. earray.length];  // rest of expressions go into b2
+            debug if (debugc)
+            {
+                printf(" split off assert\n");
+            }
             go.changes++;
             goto L1;
         }
-        b.Belem = bl_delist(list_reverse(bel));
+        b.Belem = bl_delist2(earray);
     }
+    elems.dtor();
+}
+
+/*************************************************
+ * Detect exit blocks and move them to the end.
+ */
+private void blexit()
+{
+    debug if (debugc) printf("blexit()\n");
+
+    Barray!(block*) bexits;
+    for (block *b = startblock; b; b = b.Bnext)
+    {
+        /* Not sure of effect of jumping out of a try block
+         */
+        if (b.Btry)
+            continue;
+
+        if (b.BC == BCexit)
+            continue;
+
+        if (!b.Belem || el_returns(b.Belem))
+            continue;
+
+        b.BC = BCexit;
+
+        foreach (bsl; ListRange(b.Bsucc))
+        {
+            block *bs = list_block(bsl);
+            list_subtract(&bs.Bpred, b);
+        }
+        list_free(&b.Bsucc, FPNULL);
+
+        if (b != startblock && b.Bnext)
+            bexits.push(b);
+
+        debug if (debugc)
+            printf(" to exit block\n");
+        go.changes++;
+    }
+
+    /* Move all the newly detected Bexit blocks in bexits[] to the end
+     */
+
+    /* First remove them from the list of blocks
+     */
+    size_t i = 0;
+    block** pb = &startblock.Bnext;
+    while (1)
+    {
+        if (i == bexits.length)
+            break;
+
+        if (*pb == bexits[i])
+        {
+            *pb = (*pb).Bnext;
+            ++i;
+        }
+        else
+            pb = &(*pb).Bnext;
+    }
+
+    /* Advance pb to point to the last Bnext
+     */
+    while (*pb)
+        pb = &(*pb).Bnext;
+
+    /* Append the bexits[] to the end
+     */
+    foreach (b; bexits[])
+    {
+        *pb = b;
+        pb = &b.Bnext;
+    }
+    *pb = null;
+
+    bexits.dtor();
 }
 
 } //!SPP

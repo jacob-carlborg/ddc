@@ -33,6 +33,8 @@ subPackage {
     "src/dmd/utf.d" \
     "src/dmd/utils.d"
 
+  versions "CallbackAPI"
+
   preGenerateCommands `
     "$${DUB_EXE}" \
     --arch=$${DUB_ARCH} \
@@ -62,6 +64,8 @@ subPackage {
     "src/dmd/permissivevisitor.d" \
     "src/dmd/strictvisitor.d"
 
+  versions "CallbackAPI"
+
   dependency "ddc:lexer" version="*"
 }
 
@@ -69,13 +73,14 @@ subPackage {
   name "frontend"
   targetType "library"
   sourcePaths "src/dmd"
-  stringImportPaths "res"
+  stringImportPaths "src/dmd/res"
 
   versions \
     "NoBackend" \
     "GC" \
     "NoMain" \
-    "MARS"
+    "MARS" \
+    "CallbackAPI"
 
   excludedSourceFiles "src/dmd/backend/*"
   excludedSourceFiles "src/dmd/root/*"

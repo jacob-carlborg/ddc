@@ -1,3 +1,5 @@
+// See ../../README.md for information about DMD unit tests.
+
 module compilable.crlf;
 
 import support : afterEach, beforeEach, defaultImportPaths;
@@ -70,7 +72,8 @@ unittest
 
     enum code = crLFCode ~ "\r\n" ~ codeLines.join('\n') ~ '\n';
 
-    assert(compiles(code));
+    const result = compiles(code);
+    assert(result, "\n" ~ result.toString);
 }
 
 private:

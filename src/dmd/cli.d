@@ -241,6 +241,7 @@ struct Usage
         Option("cov",
             "do code coverage analysis"
         ),
+        Option("cov=ctfe", "Include code executed during CTFE in coverage report"),
         Option("cov=<nnn>",
             "require at least nnn% code coverage",
             `Perform $(LINK2 $(ROOT_DIR)code_coverage.html, code coverage analysis) and generate
@@ -368,8 +369,16 @@ dmd -cov -unittest myprog.d
         Option("Hf=<filename>",
             "write 'header' file to filename"
         ),
-        Option("HC",
-            "generate C++ 'header' file"
+        Option("HC[=[silent|verbose]]",
+            "generate C++ 'header' file",
+            `Generate C++ 'header' files using the given configuration:",
+            $(DL
+            $(DT silent)$(DD only list extern(C[++]) declarations (default))
+            $(DT verbose)$(DD also add comments for ignored declarations (e.g. extern(D)))
+            )`,
+        ),
+        Option("HC=[?|h|help]",
+            "list available modes for C++ 'header' file generation"
         ),
         Option("HCd=<directory>",
             "write C++ 'header' file to directory"
@@ -582,8 +591,8 @@ dmd -cov -unittest myprog.d
             off when generating an object, interface, or Ddoc file
             name. $(SWLINK -op) will leave it on.`,
         ),
-        Option("preview=<id>",
-            "enable an upcoming language change identified by 'id'",
+        Option("preview=<name>",
+            "enable an upcoming language change identified by 'name'",
             `Preview an upcoming language change identified by $(I id)`,
         ),
         Option("preview=[h|help|?]",
@@ -608,8 +617,8 @@ dmd -cov -unittest myprog.d
             done for system and trusted functions, and assertion failures
             are undefined behaviour.`
         ),
-        Option("revert=<id>",
-            "revert language change identified by 'id'",
+        Option("revert=<name>",
+            "revert language change identified by 'name'",
             `Revert language change identified by $(I id)`,
         ),
         Option("revert=[h|help|?]",
@@ -627,8 +636,8 @@ dmd -cov -unittest myprog.d
             `$(UNIX Generate shared library)
              $(WINDOWS Generate DLL library)`,
         ),
-        Option("transition=<id>",
-            "help with language change identified by 'id'",
+        Option("transition=<name>",
+            "help with language change identified by 'name'",
             `Show additional info about language change identified by $(I id)`,
         ),
         Option("transition=[h|help|?]",
@@ -681,6 +690,14 @@ dmd -cov -unittest myprog.d
         Option("vtls",
             "list all variables going into thread local storage"
         ),
+        Option("vtemplates=[list-instances]",
+            "list statistics on template instantiations",
+            `An optional argument determines extra diagnostics,
+            where:
+            $(DL
+            $(DT list-instances)$(DD Also shows all instantiation contexts for each template.)
+            )`,
+        ),
         Option("w",
             "warnings as errors (compilation will halt)",
             `Enable $(LINK2 $(ROOT_DIR)articles/warnings.html, warnings)`
@@ -728,6 +745,7 @@ dmd -cov -unittest myprog.d
     /// Returns all available reverts
     static immutable reverts = [
         Feature("dip25", "noDIP25", "revert DIP25 changes https://github.com/dlang/DIPs/blob/master/DIPs/archive/DIP25.md"),
+        Feature("markdown", "markdown", "disable Markdown replacements in Ddoc"),
     ];
 
     /// Returns all available previews
@@ -741,7 +759,6 @@ dmd -cov -unittest myprog.d
         Feature("dip1021", "useDIP1021",
             "implement https://github.com/dlang/DIPs/blob/master/DIPs/accepted/DIP1021.md (Mutable function arguments)"),
         Feature("fieldwise", "fieldwise", "use fieldwise comparisons for struct equality"),
-        Feature("markdown", "markdown", "enable Markdown replacements in Ddoc"),
         Feature("fixAliasThis", "fixAliasThis",
             "when a symbol is resolved, check alias this scope before going to upper scopes"),
         Feature("intpromote", "fix16997",
@@ -752,8 +769,11 @@ dmd -cov -unittest myprog.d
             "enable rvalue arguments to ref parameters"),
         Feature("nosharedaccess", "noSharedAccess",
             "disable access to shared memory objects"),
-        Feature("in", "inMeansScopeConst",
-            "in means scope const"),
+        Feature("in", "previewIn",
+            "`in` on parameters means `scope const [ref]` and accepts rvalues"),
+        // DEPRECATED previews
+        // trigger deprecation message once D repositories don't use this flag anymore
+        Feature("markdown", "markdown", "enable Markdown replacements in Ddoc", false, false),
     ];
 }
 
@@ -815,7 +835,7 @@ struct CLIUsage
         auto buf = description.capitalize ~ " listed by -"~flagName~"=name:
 ";
         auto allTransitions = [Usage.Feature("all", null,
-            "list information on all " ~ description)] ~ features;
+            "Enables all available " ~ description)] ~ features;
         foreach (t; allTransitions)
         {
             if (t.deprecated_)
@@ -872,5 +892,12 @@ struct CLIUsage
   =c++11                Sets `__traits(getTargetInfo, \"cppStd\")` to `201103`
   =c++14                Sets `__traits(getTargetInfo, \"cppStd\")` to `201402`
   =c++17                Sets `__traits(getTargetInfo, \"cppStd\")` to `201703`
+";
+
+    /// Options supported by -HC
+    enum hcUsage = "Available header generation modes:
+  =[h|help|?]           List information on all available choices
+  =silent               Silently ignore non-exern(C[++]) declarations
+  =verbose              Add a comment for ignored non-exern(C[++]) declarations
 ";
 }

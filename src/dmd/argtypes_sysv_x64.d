@@ -37,7 +37,7 @@ extern (C++) TypeTuple toArgTypes_sysv_x64(Type t)
     if (size == 0)
         return null;
     if (size > 32)
-        return new TypeTuple();
+        return TypeTuple.empty;
 
     const classification = classify(t, size);
     const classes = classification.slice();
@@ -47,7 +47,7 @@ extern (C++) TypeTuple toArgTypes_sysv_x64(Type t)
     switch (c0)
     {
     case Class.memory:
-         return new TypeTuple();
+         return TypeTuple.empty;
     case Class.x87:
         return new TypeTuple(Type.tfloat80);
     case Class.complexX87:
@@ -359,7 +359,8 @@ extern (C++) final class ToClassesVisitor : Visitor
                 else
                 {
                     assert(foffset % 8 == 0 ||
-                        fEightbyteEnd - fEightbyteStart <= 1,
+                        fEightbyteEnd - fEightbyteStart <= 1 ||
+                        !global.params.isLP64,
                         "Field not aligned at eightbyte boundary but contributing to multiple eightbytes?"
                     );
                     foreach (i, fclass; classify(ftype, fsize).slice())

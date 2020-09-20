@@ -1,12 +1,12 @@
 /**
- * Compiler implementation of the
- * $(LINK2 http://www.dlang.org, D programming language).
+ * Top level code for the code generator.
  *
  * Copyright:   Copyright (C) 1985-1998 by Symantec
  *              Copyright (C) 2000-2020 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/backend/cgcod.d, backend/cgcod.d)
+ * Documentation:  https://dlang.org/phobos/dmd_backend_cgcod.html
  * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/backend/cgcod.d
  */
 
@@ -44,6 +44,7 @@ import dmd.backend.obj;
 import dmd.backend.oper;
 import dmd.backend.outbuf;
 import dmd.backend.rtlsym;
+import dmd.backend.symtab;
 import dmd.backend.ty;
 import dmd.backend.type;
 import dmd.backend.xmm;
@@ -268,9 +269,9 @@ tryagain:
     if (!config.fulltypes || (config.flags4 & CFG4optimized))
     {
         regm_t noparams = 0;
-        for (int i = 0; i < globsym.top; i++)
+        for (int i = 0; i < globsym.length; i++)
         {
-            Symbol *s = globsym.tab[i];
+            Symbol *s = globsym[i];
             s.Sflags &= ~SFLread;
             switch (s.Sclass)
             {
@@ -351,9 +352,9 @@ tryagain:
     }
 
     // See if we need to enforce a particular stack alignment
-    foreach (i; 0 .. globsym.top)
+    foreach (i; 0 .. globsym.length)
     {
-        Symbol *s = globsym.tab[i];
+        Symbol *s = globsym[i];
 
         if (Symbol_Sisdead(s, anyiasm))
             continue;
@@ -647,7 +648,7 @@ tryagain:
                 // Do this before code is emitted because we patch some instructions
                 nteh_gentables(sfunc);
             }
-            if (usednteh & EHtry &&             // saw BCtry or BC_try (test EHcleanup too?)
+            if (usednteh & (EHtry | EHcleanup) &&   // saw BCtry or BC_try or OPddtor
                 config.ehmethod == EHmethod.EH_DM)
             {
                 except_gentables();
@@ -698,7 +699,7 @@ tryagain:
 
     assert(global87.stackused == 0);             /* nobody in 8087 stack         */
 
-    global87.save.__dtor();       // clean up ndp save array
+    global87.save.dtor();       // clean up ndp save array
 }
 
 /*********************************************
@@ -741,7 +742,7 @@ void prolog(ref CodeBuilder cdb)
 {
     bool enter;
 
-    //printf("cod3.prolog() %s, needframe = %d, Auto.alignment = %d\n", funcsym_p.Sident, needframe, Auto.alignment);
+    //printf("cod3.prolog() %s, needframe = %d, Auto.alignment = %d\n", funcsym_p.Sident.ptr, needframe, Auto.alignment);
     debug debugw && printf("funcstart()\n");
     regcon.immed.mval = 0;                      /* no values in registers yet   */
     version (FRAMEPTR)
@@ -754,7 +755,7 @@ void prolog(ref CodeBuilder cdb)
     bool pushalloc = false;
     tym_t tyf = funcsym_p.ty();
     tym_t tym = tybasic(tyf);
-    uint farfunc = tyfarfunc(tym);
+    const farfunc = tyfarfunc(tym) != 0;
 
     // Special Intel 64 bit ABI prolog setup for variadic functions
     Symbol *sv64 = null;                        // set to __va_argsave
@@ -767,9 +768,9 @@ void prolog(ref CodeBuilder cdb)
          */
         /* Look for __va_argsave
          */
-        for (SYMIDX si = 0; si < globsym.top; si++)
+        for (SYMIDX si = 0; si < globsym.length; si++)
         {
-            Symbol *s = globsym.tab[si];
+            Symbol *s = globsym[si];
             if (s.Sident[0] == '_' && strcmp(s.Sident.ptr, "__va_argsave") == 0)
             {
                 if (!(s.Sflags & SFLdead))
@@ -942,7 +943,17 @@ else
 
     //printf("Fast.size = x%x, Auto.size = x%x\n", (int)Fast.size, (int)Auto.size);
 
-    cgstate.funcarg.alignment = cgstate.funcarg.size ? STACKALIGN : REGSIZE;
+    cgstate.funcarg.alignment = STACKALIGN;
+    /* If the function doesn't need the extra alignment, don't do it.
+     * Can expand on this by allowing for locals that don't need extra alignment
+     * and calling functions that don't need it.
+     */
+    if (pushoff == 0 && !calledafunc && config.fpxmmregs && (I32 || I64))
+    {
+        cgstate.funcarg.alignment = I64 ? 8 : 4;
+    }
+
+    //printf("pushoff = %d, size = %d, alignment = %d, bias = %d\n", cast(int)pushoff, cast(int)cgstate.funcarg.size, cast(int)cgstate.funcarg.alignment, cast(int)bias);
     cgstate.funcarg.offset = alignsection(pushoff - cgstate.funcarg.size, cgstate.funcarg.alignment, bias);
 
     localsize = -cgstate.funcarg.offset;
@@ -1041,7 +1052,7 @@ else
     }
     else if (needframe)                 // if variables or parameters
     {
-        prolog_frame(cdbx, farfunc, &xlocalsize, &enter, &cfa_offset);
+        prolog_frame(cdbx, farfunc, xlocalsize, enter, cfa_offset);
         hasframe = 1;
     }
 
@@ -1125,7 +1136,7 @@ else
             }
 
             uint regsaved;
-            prolog_trace(cdbx, farfunc != 0, &regsaved);
+            prolog_trace(cdbx, farfunc, &regsaved);
 
             if (spalign)
                 cod3_stackadj(cdbx, -spalign);
@@ -1139,8 +1150,8 @@ else
         {   Symbol *sthis;
 
             for (SYMIDX si = 0; 1; si++)
-            {   assert(si < globsym.top);
-                sthis = globsym.tab[si];
+            {   assert(si < globsym.length);
+                sthis = globsym[si];
                 if (strcmp(sthis.Sident.ptr,"this".ptr) == 0)
                     break;
             }
@@ -1251,17 +1262,17 @@ void stackoffsets(int flags)
     Symbol **autos = null;
     if (doAutoOpt)
     {
-        if (globsym.top <= autotmp.length)
+        if (globsym.length <= autotmp.length)
             autos = autotmp.ptr;
         else
-        {   autos = cast(Symbol **)malloc(globsym.top * (*autos).sizeof);
+        {   autos = cast(Symbol **)malloc(globsym.length * (*autos).sizeof);
             assert(autos);
         }
     }
     size_t autosi = 0;  // number used in autos[]
 
-    for (int si = 0; si < globsym.top; si++)
-    {   Symbol *s = globsym.tab[si];
+    for (int si = 0; si < globsym.length; si++)
+    {   Symbol *s = globsym[si];
 
         /* Don't allocate space for dead or zero size parameters
          */
@@ -1502,10 +1513,10 @@ private void blcodgen(block *bl)
         CodeBuilder cdbload; cdbload.ctor();
         CodeBuilder cdbstore; cdbstore.ctor();
 
-        sflsave = cast(char *) alloca(globsym.top * char.sizeof);
-        for (SYMIDX i = 0; i < globsym.top; i++)
+        sflsave = cast(char *) alloca(globsym.length * char.sizeof);
+        for (SYMIDX i = 0; i < globsym.length; i++)
         {
-            Symbol *s = globsym.tab[i];
+            Symbol *s = globsym[i];
 
             sflsave[i] = s.Sfl;
             if (regParamInPreg(s) &&
@@ -1528,7 +1539,7 @@ private void blcodgen(block *bl)
             {
                 if (vec_testbit(dfoidx,s.Srange))
                 {
-                    anyspill = i + 1;
+                    anyspill = cast(int)(i + 1);
                     cgreg_spillreg_prolog(bl,s,cdbstore,cdbload);
                     if (vec_testbit(dfoidx,s.Slvreg))
                     {
@@ -1572,7 +1583,7 @@ private void blcodgen(block *bl)
 
     for (int i = 0; i < anyspill; i++)
     {
-        Symbol *s = globsym.tab[i];
+        Symbol *s = globsym[i];
         s.Sfl = sflsave[i];    // undo block register assignments
     }
 
@@ -2193,6 +2204,23 @@ L3:
         getregs(cdb, retregs);
 }
 
+
+/*****************************************
+ * Allocate a scratch register.
+ * Params:
+ *      cdb = where to write any generated code to
+ *      regm = mask of registers to pick one from
+ * Returns:
+ *      selected register
+ */
+reg_t allocScratchReg(ref CodeBuilder cdb, regm_t regm)
+{
+    reg_t r;
+    allocreg(cdb, &regm, &r, TYoffset);
+    return r;
+}
+
+
 /******************************
  * Determine registers that should be destroyed upon arrival
  * to code entry point for exception handling.
@@ -2794,9 +2822,9 @@ private extern (C++) __gshared nothrow void function (ref CodeBuilder,elem *,reg
     OPcom:     &cdcom,
     OPcond:    &cdcond,
     OPcomma:   &cdcomma,
-    OPremquo:  &cdmul,
-    OPdiv:     &cdmul,
-    OPmod:     &cdmul,
+    OPremquo:  &cddiv,
+    OPdiv:     &cddiv,
+    OPmod:     &cddiv,
     OPxor:     &cdorth,
     OPstring:  &cderr,
     OPrelconst: &cdrelconst,
@@ -2829,6 +2857,7 @@ private extern (C++) __gshared nothrow void function (ref CodeBuilder,elem *,reg
     OPneg:     &cdneg,
     OPuadd:    &cderr,
     OPabs:     &cdabs,
+    OPtoprec:  &cdtoprec,
     OPsqrt:    &cdneg,
     OPsin:     &cdneg,
     OPcos:     &cdneg,
@@ -2856,8 +2885,8 @@ private extern (C++) __gshared nothrow void function (ref CodeBuilder,elem *,reg
     OPaddass:  &cdaddass,
     OPminass:  &cdaddass,
     OPmulass:  &cdmulass,
-    OPdivass:  &cdmulass,
-    OPmodass:  &cdmulass,
+    OPdivass:  &cddivass,
+    OPmodass:  &cddivass,
     OPshrass:  &cdshass,
     OPashrass: &cdshass,
     OPshlass:  &cdshass,

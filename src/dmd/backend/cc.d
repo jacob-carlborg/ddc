@@ -19,6 +19,7 @@ import dmd.backend.code_x86;
 import dmd.backend.dlist;
 import dmd.backend.dt;
 import dmd.backend.el;
+import dmd.backend.symtab;
 import dmd.backend.type;
 
 extern (C++):
@@ -146,8 +147,8 @@ else version (SCPP)
 
 enum IDMAX = 900;              // identifier max (excluding terminating 0)
 enum IDOHD = 4+1+int.sizeof*3; // max amount of overhead to ID added by
-enum STRMAX = 65000;           // max length of string (determined by
-                               // max ph size)
+enum STRMAX = 65_000;           // max length of string (determined by
+                                // max ph size)
 
 //enum SC;
 struct Thunk
@@ -702,13 +703,6 @@ struct BlockRange
  * Functions
  */
 
-struct symtab_t
-{
-    SYMIDX top;                 // 1 past end
-    SYMIDX symmax;              // max # of entries in tab[] possible
-    Symbol **tab;               // local Symbol table
-}
-
 alias func_flags_t = uint;
 enum
 {
@@ -820,8 +814,12 @@ struct func_t
 
     char *Fredirect;            // redirect function name to this name in object
 
-    // Array of catch types for EH_DWARF Types Table generation
-    Barray!(Symbol*) typesTable;
+version (SPP) { } else
+{
+    version (MARS)
+        // Array of catch types for EH_DWARF Types Table generation
+        Barray!(Symbol*) typesTable;
+}
 
     union
     {
@@ -1411,7 +1409,7 @@ struct Symbol
     targ_size_t Soffset;        // variables: offset of Symbol in its storage class
 
     // CPP || OPTIMIZER
-    SYMIDX Ssymnum;             // Symbol number (index into globsym.tab[])
+    SYMIDX Ssymnum;             // Symbol number (index into globsym[])
                                 // SCauto,SCparameter,SCtmp,SCregpar,SCregister
     // CODGEN
     int Sseg;                   // segment index
@@ -1810,6 +1808,7 @@ struct dt_t
     char dt;                            // type (DTxxxx)
     ubyte Dty;                          // pointer type
     ubyte DTn;                          // DTibytes: number of bytes
+    ubyte DTalign;                      // DTabytes: alignment (as power of 2) of pointed-to data
     union
     {
         struct                          // DTibytes

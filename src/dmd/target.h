@@ -68,6 +68,8 @@ struct Target
     // Objective-C ABI
     TargetObjC objc;
 
+    DString architectureName;    // name of the platform architecture (e.g. X86_64)
+
     template <typename T>
     struct FPTypeProperties
     {
@@ -89,12 +91,17 @@ struct Target
     FPTypeProperties<double> DoubleProperties;
     FPTypeProperties<real_t> RealProperties;
 
+private:
+    Type *tvalist;
+    const Param *params;
+
+public:
     void _init(const Param& params);
     // Type sizes and support.
     unsigned alignsize(Type *type);
     unsigned fieldalign(Type *type);
     unsigned critsecsize();
-    Type *va_listType();  // get type of va_list
+    Type *va_listType(const Loc &loc, Scope *sc);  // get type of va_list
     int isVectorTypeSupported(int sz, Type *type);
     bool isVectorOpSupported(Type *type, TOK op, Type *t2 = NULL);
     // ABI and backend.
@@ -102,6 +109,7 @@ struct Target
     TypeTuple *toArgTypes(Type *t);
     bool isReturnOnStack(TypeFunction *tf, bool needsThis);
     d_uns64 parameterSize(const Loc& loc, Type *t);
+    void applyInRefParams(TypeFunction *tf);
     Expression *getTargetInfo(const char* name, const Loc& loc);
 };
 

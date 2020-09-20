@@ -22,6 +22,7 @@ import dmd.backend.cdef;
 import dmd.backend.oper;
 import dmd.backend.global;
 import dmd.backend.el;
+import dmd.backend.symtab;
 import dmd.backend.ty;
 import dmd.backend.type;
 
@@ -128,8 +129,8 @@ void rmdeadass();
 void elimass(elem *);
 void deadvar();
 void verybusyexp();
-extern (C) list_t listrds(vec_t, elem *, vec_t);
+void listrds(vec_t, elem *, vec_t, Barray!(elem*)*);
 
 /* gslice.c */
-void sliceStructs(symtab_t* symtab, block* startblock);
+void sliceStructs(ref symtab_t symtab, block* startblock);
 

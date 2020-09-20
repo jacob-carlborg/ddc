@@ -85,40 +85,20 @@ extern (C++) struct BaseClass
         for (size_t j = sym.vtblOffset(); j < sym.vtbl.dim; j++)
         {
             FuncDeclaration ifd = sym.vtbl[j].isFuncDeclaration();
-            FuncDeclaration fd;
-            TypeFunction tf;
 
             //printf("        vtbl[%d] is '%s'\n", j, ifd ? ifd.toChars() : "null");
             assert(ifd);
 
             // Find corresponding function in this class
-            tf = ifd.type.toTypeFunction();
-            fd = cd.findFunc(ifd.ident, tf);
+            auto tf = ifd.type.toTypeFunction();
+            auto fd = cd.findFunc(ifd.ident, tf);
             if (fd && !fd.isAbstract())
             {
-                //printf("            found\n");
-                // Check that calling conventions match
-                if (fd.linkage != ifd.linkage)
-                    fd.error("linkage doesn't match interface function");
-
-                // Check that it is current
-                //printf("newinstance = %d fd.toParent() = %s ifd.toParent() = %s\n",
-                    //newinstance, fd.toParent().toChars(), ifd.toParent().toChars());
-                if (newinstance && fd.toParent() != cd && ifd.toParent() == sym)
-                    cd.error("interface function `%s` is not implemented", ifd.toFullSignature());
-
                 if (fd.toParent() == cd)
                     result = true;
             }
             else
-            {
-                //printf("            not found %p\n", fd);
-                // BUG: should mark this class as abstract?
-                if (!cd.isAbstract())
-                    cd.error("interface function `%s` is not implemented", ifd.toFullSignature());
-
                 fd = null;
-            }
             if (vtbl)
                 (*vtbl)[j] = fd;
         }
@@ -208,10 +188,6 @@ extern (C++) class ClassDeclaration : AggregateDeclaration
     /// to prevent recursive attempts
     private bool inuse;
 
-    /// true if this class has an identifier, but was originally declared anonymous
-    /// used in support of https://issues.dlang.org/show_bug.cgi?id=17371
-    private bool isActuallyAnonymous;
-
     Abstract isabstract;
 
     /// set the progress of base classes resolving
@@ -230,11 +206,9 @@ extern (C++) class ClassDeclaration : AggregateDeclaration
         objc = ObjcClassDeclaration(this);
 
         if (!id)
-        {
-            isActuallyAnonymous = true;
-        }
+            id = Identifier.generateAnonymousId("class");
 
-        super(loc, id ? id : Identifier.generateId("__anonclass"));
+        super(loc, id);
 
         __gshared const(char)* msg = "only object.d can define this reserved class name";
 
@@ -693,11 +667,6 @@ extern (C++) class ClassDeclaration : AggregateDeclaration
     final bool hasMonitor()
     {
         return classKind == ClassKind.d;
-    }
-
-    override bool isAnonymous()
-    {
-        return isActuallyAnonymous;
     }
 
     final bool isFuncHidden(FuncDeclaration fd)

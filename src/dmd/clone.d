@@ -315,7 +315,7 @@ FuncDeclaration buildOpAssign(StructDeclaration sd, Scope* sc)
         auto idswap = Identifier.generateId("__swap");
         auto swap = new VarDeclaration(loc, sd.type, idswap, new VoidInitializer(loc));
         swap.storage_class |= STC.nodtor | STC.temp | STC.ctfe;
-        if (tdtor.isscope)
+        if (tdtor.isScopeQual)
             swap.storage_class |= STC.scope_;
         auto e1 = new DeclarationExp(loc, swap);
 
@@ -809,7 +809,7 @@ FuncDeclaration buildXtoHash(StructDeclaration sd, Scope* sc)
      * hash value will also contain the result of parent class's toHash().
      */
     const(char)[] code =
-        "size_t h = 0;" ~
+        ".object.size_t h = 0;" ~
         "foreach (i, T; typeof(p.tupleof))" ~
         // workaround https://issues.dlang.org/show_bug.cgi?id=17968
         "    static if(is(T* : const(.object.Object)*)) " ~
@@ -1146,10 +1146,12 @@ DtorDeclaration buildExternDDtor(AggregateDeclaration ad, Scope* sc)
 /******************************************
  * Create inclusive invariant for struct/class by aggregating
  * all the invariants in invs[].
- *      void __invariant() const [pure nothrow @trusted]
- *      {
- *          invs[0](), invs[1](), ...;
- *      }
+ * ---
+ * void __invariant() const [pure nothrow @trusted]
+ * {
+ *     invs[0](), invs[1](), ...;
+ * }
+ * ---
  */
 FuncDeclaration buildInv(AggregateDeclaration ad, Scope* sc)
 {

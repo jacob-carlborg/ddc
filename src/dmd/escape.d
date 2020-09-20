@@ -25,6 +25,7 @@ import dmd.errors;
 import dmd.expression;
 import dmd.func;
 import dmd.globals;
+import dmd.id;
 import dmd.identifier;
 import dmd.init;
 import dmd.mtype;
@@ -88,6 +89,8 @@ bool checkMutableArguments(Scope* sc, FuncDeclaration fd, TypeFunction tf,
         escapeBy = newPtr[0 .. len];
         escapeByStorage = escapeBy;
     }
+    else
+        escapeBy = escapeBy[0 .. len];
 
     const paramLength = tf.parameterList.length;
 
@@ -102,7 +105,7 @@ bool checkMutableArguments(Scope* sc, FuncDeclaration fd, TypeFunction tf,
             if (i < paramLength)
             {
                 eb.param = tf.parameterList[i];
-                refs = (eb.param.storageClass & (STC.out_ | STC.ref_)) != 0;
+                refs = eb.param.isReference();
                 eb.isMutable = eb.param.isReferenceToMutable(arg.type);
             }
             else
@@ -405,7 +408,7 @@ bool checkParamArgumentEscape(Scope* sc, FuncDeclaration fdc, Parameter par, Exp
 
     foreach (Expression ee; er.byexp)
     {
-        if (sc.func.setUnsafe())
+        if (sc.func && sc.func.setUnsafe())
         {
             if (!gag)
                 error(ee.loc, "reference to stack allocated value returned by `%s` assigned to non-scope parameter `%s`",
@@ -889,6 +892,28 @@ ByRef:
             continue;
         }
 
+        if (va && ee.op == TOK.call && ee.type.toBasetype().ty == Tstruct &&
+            !(va.storage_class & STC.temp) && va.ident != Id.withSym &&
+            sc.func.setUnsafe())
+        {
+            if (!gag)
+                error(ee.loc, "address of struct temporary returned by `%s` assigned to longer lived variable `%s`",
+                    ee.toChars(), va.toChars());
+            result = true;
+            continue;
+        }
+
+        if (va && ee.op == TOK.structLiteral &&
+            !(va.storage_class & STC.temp) && va.ident != Id.withSym &&
+            sc.func.setUnsafe())
+        {
+            if (!gag)
+                error(ee.loc, "address of struct literal `%s` assigned to longer lived variable `%s`",
+                    ee.toChars(), va.toChars());
+            result = true;
+            continue;
+        }
+
         if (va && !va.isDataseg() && !va.doNotInferScope)
         {
             if (!va.isScope() && inferScope)
@@ -1049,7 +1074,7 @@ bool checkNewEscape(Scope* sc, Expression e, bool gag)
                 const(char)* msg = "copying `%s` into allocated memory escapes a reference to %s variable `%s`";
                 if (emitError)
                     error(e.loc, msg, e.toChars(), kind, v.toChars());
-                else
+                else if (!sc.isDeprecated())
                     deprecation(e.loc, msg, e.toChars(), kind, v.toChars());
             }
             result |= emitError;
@@ -1266,15 +1291,32 @@ private bool checkReturnEscapeImpl(Scope* sc, Expression e, bool refs, bool gag)
         {
             if (!gag)
             {
-                const(char)* msg;
-                if (v.storage_class & STC.parameter)
-                    msg = "returning `%s` escapes a reference to parameter `%s`, perhaps annotate with `return`";
+                const(char)* msg, supplemental;
+                if (v.storage_class & STC.parameter &&
+                    (v.type.hasPointers() || v.storage_class & STC.ref_))
+                {
+                    msg = "returning `%s` escapes a reference to parameter `%s`";
+                    supplemental = "perhaps annotate the parameter with `return`";
+                }
                 else
+                {
                     msg = "returning `%s` escapes a reference to local variable `%s`";
+                    if (v.ident is Id.This)
+                        supplemental = "perhaps annotate the function with `return`";
+                }
+
                 if (emitError)
-                    error(e.loc, msg, e.toChars(), v.toChars());
+                {
+                    e.error(msg, e.toChars(), v.toChars());
+                    if (supplemental)
+                        e.errorSupplemental(supplemental);
+                }
                 else
-                    deprecation(e.loc, msg, e.toChars(), v.toChars());
+                {
+                    e.deprecation(msg, e.toChars(), v.toChars());
+                    if (supplemental)
+                        deprecationSupplemental(e.loc, supplemental);
+                }
             }
             result = true;
         }
@@ -1402,10 +1444,8 @@ private void inferReturn(FuncDeclaration fd, VarDeclaration v)
         // Perform 'return' inference on parameter
         if (tf.ty == Tfunction)
         {
-            const dim = tf.parameterList.length;
-            foreach (const i; 0 .. dim)
+            foreach (i, p; tf.parameterList)
             {
-                Parameter p = tf.parameterList[i];
                 if (p.ident == v.ident)
                 {
                     p.storageClass |= STC.return_ | STC.returninferred;
@@ -1708,7 +1748,7 @@ void escapeByValue(Expression e, EscapeByResults* er, bool live = false)
                 AggregateDeclaration ad;
                 if (global.params.vsafe && tf.isreturn && fd && (ad = fd.isThis()) !is null)
                 {
-                    if (ad.isClassDeclaration() || tf.isscope)       // this is 'return scope'
+                    if (ad.isClassDeclaration() || tf.isScopeQual)       // this is 'return scope'
                         dve.e1.accept(this);
                     else if (ad.isStructDeclaration()) // this is 'return ref'
                     {
@@ -1735,7 +1775,7 @@ void escapeByValue(Expression e, EscapeByResults* er, bool live = false)
                 // If it's also a nested function that is 'return scope'
                 if (fd && fd.isNested())
                 {
-                    if (tf.isreturn && tf.isscope)
+                    if (tf.isreturn && tf.isScopeQual)
                         er.byexp.push(e);
                 }
             }
@@ -1757,7 +1797,7 @@ void escapeByValue(Expression e, EscapeByResults* er, bool live = false)
                 FuncDeclaration fd = ve.var.isFuncDeclaration();
                 if (fd && fd.isNested())
                 {
-                    if (tf.isreturn && tf.isscope)
+                    if (tf.isreturn && tf.isScopeQual)
                         er.byexp.push(e);
                 }
             }
@@ -1973,7 +2013,7 @@ void escapeByRef(Expression e, EscapeByResults* er, bool live = false)
                     {
                         if (dve.var.storage_class & STC.ref_ || tf.isref)
                             dve.e1.accept(this);
-                        else if (dve.var.storage_class & STC.scope_ || tf.isscope)
+                        else if (dve.var.storage_class & STC.scope_ || tf.isScopeQual)
                             escapeByValue(dve.e1, er, live);
                     }
                     // If it's also a nested function that is 'return ref'
@@ -2211,7 +2251,7 @@ bool isReferenceToMutable(Type t)
  */
 bool isReferenceToMutable(Parameter p, Type t)
 {
-    if (p.storageClass & (STC.ref_ | STC.out_))
+    if (p.isReference())
     {
         if (p.type.isConst() || p.type.isImmutable())
             return false;
