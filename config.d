@@ -49,14 +49,15 @@ Returns: the generated version, or the content of `versionFile`
 string generateVersion(const string versionFile)
 {
     import std.process : execute;
-    import std.file : readText;
+    import std.file : exists, readText;
     import std.path : dirName;
     import std.string : strip;
 
-    enum workDir = __FILE_FULL_PATH__.dirName;
-    const result = execute(["git", "-C", workDir, "describe", "--dirty"]);
+    if (versionFile.exists)
+        return versionFile.readText.strip;
 
-    return result.status == 0 ? result.output.strip : versionFile.readText;
+    enum workDir = __FILE_FULL_PATH__.dirName;
+    return execute(["git", "-C", workDir, "describe", "--dirty"]).output.strip;
 }
 
 /**
