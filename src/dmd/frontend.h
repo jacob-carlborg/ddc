@@ -150,46 +150,45 @@ enum class LINK
 class LinkDeclaration;
 class Condition;
 class StaticForeach;
-enum class BUILTIN : int8_t
-{
-    unknown = -1,
-    unimp = 0,
-    gcc = 1,
-    llvm = 2,
-    sin = 3,
-    cos = 4,
-    tan = 5,
-    sqrt = 6,
-    fabs = 7,
-    ldexp = 8,
-    log = 9,
-    log2 = 10,
-    log10 = 11,
-    exp = 12,
-    expm1 = 13,
-    exp2 = 14,
-    round = 15,
-    floor = 16,
-    ceil = 17,
-    trunc = 18,
-    copysign = 19,
-    pow = 20,
-    fmin = 21,
-    fmax = 22,
-    fma = 23,
-    isnan = 24,
-    isinfinity = 25,
-    isfinite = 26,
-    bsf = 27,
-    bsr = 28,
-    bswap = 29,
-    popcnt = 30,
-    yl2x = 31,
-    yl2xp1 = 32,
-    toPrecFloat = 33,
-    toPrecDouble = 34,
-    toPrecReal = 35,
-};
+BEGIN_ENUM_NUMERIC(uint8_t, BUILTIN, BUILTIN, builtin)
+ENUM_KEY_NUMERIC(uint8_t, unknown, 255u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, unimp, 0u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, gcc, 1u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, llvm, 2u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, sin, 3u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, cos, 4u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, tan, 5u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, sqrt, 6u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, fabs, 7u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, ldexp, 8u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, log, 9u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, log2, 10u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, log10, 11u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, exp, 12u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, expm1, 13u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, exp2, 14u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, round, 15u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, floor, 16u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, ceil, 17u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, trunc, 18u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, copysign, 19u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, pow, 20u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, fmin, 21u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, fmax, 22u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, fma, 23u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, isnan, 24u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, isinfinity, 25u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, isfinite, 26u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, bsf, 27u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, bsr, 28u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, bswap, 29u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, popcnt, 30u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, yl2x, 31u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, yl2xp1, 32u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, toPrecFloat, 33u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, toPrecDouble, 34u, BUILTIN, BUILTIN, builtin, BUILTIN)
+ENUM_KEY_NUMERIC(uint8_t, toPrecReal, 35u, BUILTIN, BUILTIN, builtin, BUILTIN)
+END_ENUM_NUMERIC(uint8_t, BUILTIN, BUILTIN, builtin)
 
 struct UnionExp;
 struct complex_t;
