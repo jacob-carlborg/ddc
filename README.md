@@ -1,4 +1,4 @@
-DMD
+DDC
 ===
 
 [![GitHub tag](https://img.shields.io/github/tag-date/dlang/dmd.svg?maxAge=86400&style=flat)](https://github.com/dlang/dmd/releases)
@@ -28,3 +28,9 @@ an email to walter@digitalmars.com with the statement:
 "I hereby assign copyright in my contributions to DMD to the D Language Foundation"
 
 and include your name and date.
+
+### Why Fork?
+
+This is a fork of the [DMD compiler](https://github.com/dlang/dmd).
+The intention is to be able to freely make any changes to the source code to
+make the compiler usable as a library.
