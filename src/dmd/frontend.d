@@ -12,7 +12,7 @@ module dmd.frontend;
 
 import dmd.astcodegen : ASTCodegen;
 import dmd.dmodule : Module;
-import dmd.globals : CHECKENABLE, Loc, DiagnosticReporting;
+import dmd.globals : CHECKENABLE, Loc, DiagnosticReporting, Param;
 import dmd.errors : DiagnosticHandler, diagnosticHandler, Classification;
 
 import std.range.primitives : isInputRange, ElementType;
@@ -106,30 +106,20 @@ void initDMD(
     ContractChecks contractChecks = ContractChecks()
 )
 {
-    import std.algorithm : each;
-
-    import dmd.root.ctfloat : CTFloat;
-
-    version (CRuntime_Microsoft)
-        import dmd.root.longdouble : initFPU;
-
-    import dmd.cond : VersionCondition;
-    import dmd.dmodule : Module;
-    import dmd.expression : Expression;
-    import dmd.filecache : FileCache;
-    import dmd.globals : CHECKENABLE, global;
-    import dmd.id : Id;
-    import dmd.identifier : Identifier;
-    import dmd.mars : setTarget, addDefaultVersionIdentifiers;
-    import dmd.mtype : Type;
-    import dmd.objc : Objc;
-    import dmd.target : target;
+    import dmd.globals : global;
 
     diagnosticHandler = handler;
 
     global._init();
+    setContractChecks(contractChecks, global.params);
+    setTarget(global.params);
+    setVersionIdentifiers(versionIdentifiers, global.params);
+    initializeStaticData(global.params);
+}
 
-    with (global.params)
+void setContractChecks(ContractChecks contractChecks, ref Param params)
+{
+    with (params)
     {
         useIn = contractChecks.precondition;
         useInvariants = contractChecks.invariant_;
@@ -138,10 +128,41 @@ void initDMD(
         useAssert = contractChecks.assert_;
         useSwitchError = contractChecks.switchError;
     }
+}
+
+void setTarget(ref Param params)
+{
+    import dmd.mars : setTarget;
+
+    setTarget(params);
+}
+
+void setVersionIdentifiers(const string[] versionIdentifiers, const ref Param params)
+{
+    import std.algorithm : each;
+
+    import dmd.cond : VersionCondition;
+    import dmd.mars : addDefaultVersionIdentifiers;
 
     versionIdentifiers.each!(VersionCondition.addGlobalIdent);
-    setTarget(global.params);
-    addDefaultVersionIdentifiers(global.params);
+    addDefaultVersionIdentifiers(params);
+}
+
+void initializeStaticData(ref Param params)
+{
+    import dmd.root.ctfloat : CTFloat;
+
+    version (CRuntime_Microsoft)
+        import dmd.root.longdouble : initFPU;
+
+    import dmd.dmodule : Module;
+    import dmd.expression : Expression;
+    import dmd.filecache : FileCache;
+    import dmd.globals : global;
+    import dmd.id : Id;
+    import dmd.mtype : Type;
+    import dmd.objc : Objc;
+    import dmd.target : target;
 
     Type._init();
     Id.initialize();
