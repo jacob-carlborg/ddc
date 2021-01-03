@@ -754,6 +754,19 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
         aliasSemantic(dsym, sc);
     }
 
+    override void visit(AliasAssign dsym)
+    {
+        //printf("visit(AliasAssign)\n");
+        if (dsym.semanticRun >= PASS.semanticdone)
+            return;
+        assert(dsym.semanticRun <= PASS.semantic);
+
+        if (!sc.func && dsym.inNonRoot())
+            return;
+
+        aliasAssignSemantic(dsym, sc);
+    }
+
     override void visit(VarDeclaration dsym)
     {
         version (none)
@@ -1836,6 +1849,42 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
 
     override void visit(PragmaDeclaration pd)
     {
+        void declarations()
+        {
+            if (!pd.decl)
+                return;
+
+            Scope* sc2 = pd.newScope(sc);
+            for (size_t i = 0; i < pd.decl.dim; i++)
+            {
+                Dsymbol s = (*pd.decl)[i];
+                s.dsymbolSemantic(sc2);
+                if (pd.ident == Id.mangle)
+                {
+                    assert(pd.args && pd.args.dim == 1);
+                    if (auto se = (*pd.args)[0].toStringExp())
+                    {
+                        const name = (cast(const(char)[])se.peekData()).xarraydup;
+                        uint cnt = setMangleOverride(s, name);
+                        if (cnt > 1)
+                        pd.error("can only apply to a single declaration");
+                    }
+                }
+            }
+            if (sc2 != sc)
+                sc2.pop();
+        }
+
+        void noDeclarations()
+        {
+            if (pd.decl)
+            {
+                pd.error("is missing a terminating `;`");
+                declarations();
+                // do them anyway, to avoid segfaults.
+            }
+        }
+
         // Should be merged with PragmaStatement
         //printf("\tPragmaDeclaration::semantic '%s'\n", pd.toChars());
         if (global.params.mscoff)
@@ -1848,12 +1897,12 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
                 {
                     auto se = semanticString(sc, (*pd.args)[0], "linker directive");
                     if (!se)
-                        goto Lnodecl;
+                        return noDeclarations();
                     (*pd.args)[0] = se;
                     if (global.params.verbose)
                         message("linkopt   %.*s", cast(int)se.len, se.peekString().ptr);
                 }
-                goto Lnodecl;
+                return noDeclarations();
             }
         }
         if (pd.ident == Id.msg)
@@ -1890,7 +1939,7 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
                 }
                 fprintf(stderr, "\n");
             }
-            goto Lnodecl;
+            return noDeclarations();
         }
         else if (pd.ident == Id.lib)
         {
@@ -1900,7 +1949,7 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
             {
                 auto se = semanticString(sc, (*pd.args)[0], "library name");
                 if (!se)
-                    goto Lnodecl;
+                    return noDeclarations();
                 (*pd.args)[0] = se;
 
                 auto name = se.peekString().xarraydup;
@@ -1920,7 +1969,7 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
                 }
                 mem.xfree(name.ptr);
             }
-            goto Lnodecl;
+            return noDeclarations();
         }
         else if (pd.ident == Id.startaddress)
         {
@@ -1940,11 +1989,20 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
                 if (!sa || !sa.isFuncDeclaration())
                     pd.error("function name expected for start address, not `%s`", e.toChars());
             }
-            goto Lnodecl;
+            return noDeclarations();
         }
         else if (pd.ident == Id.Pinline)
         {
-            goto Ldecl;
+            if (pd.args && pd.args.dim > 1)
+            {
+                pd.error("one boolean expression expected for `pragma(inline)`, not %llu", cast(ulong) pd.args.dim);
+                pd.args.setDim(1);
+                (*pd.args)[0] = ErrorExp.get();
+            }
+
+            // this pragma now gets evaluated on demand in function semantic
+
+            return declarations();
         }
         else if (pd.ident == Id.mangle)
         {
@@ -1955,23 +2013,23 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
                 pd.error("string expected for mangled name");
                 pd.args.setDim(1);
                 (*pd.args)[0] = ErrorExp.get(); // error recovery
-                goto Ldecl;
+                return declarations();
             }
 
             auto se = semanticString(sc, (*pd.args)[0], "mangled name");
             if (!se)
-                goto Ldecl;
+                return declarations();
             (*pd.args)[0] = se; // Will be used later
 
             if (!se.len)
             {
                 pd.error("zero-length string not allowed for mangled name");
-                goto Ldecl;
+                return declarations();
             }
             if (se.sz != 1)
             {
                 pd.error("mangled name characters can only be of type `char`");
-                goto Ldecl;
+                return declarations();
             }
             version (all)
             {
@@ -2014,79 +2072,50 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
         {
             if (pd.args && pd.args.dim != 0)
                 pd.error("takes no argument");
-            goto Ldecl;
+            return declarations();
         }
         else if (pd.ident == Id.printf || pd.ident == Id.scanf)
         {
             if (pd.args && pd.args.dim != 0)
                 pd.error("takes no argument");
-            goto Ldecl;
+            return declarations();
         }
-        else if (global.params.ignoreUnsupportedPragmas)
+        else if (!global.params.ignoreUnsupportedPragmas)
         {
-            if (global.params.verbose)
-            {
-                /* Print unrecognized pragmas
-                 */
-                OutBuffer buf;
-                buf.writestring(pd.ident.toString());
-                if (pd.args)
-                {
-                    const errors_save = global.startGagging();
-                    for (size_t i = 0; i < pd.args.dim; i++)
-                    {
-                        Expression e = (*pd.args)[i];
-                        sc = sc.startCTFE();
-                        e = e.expressionSemantic(sc);
-                        e = resolveProperties(sc, e);
-                        sc = sc.endCTFE();
-                        e = e.ctfeInterpret();
-                        if (i == 0)
-                            buf.writestring(" (");
-                        else
-                            buf.writeByte(',');
-                        buf.writestring(e.toChars());
-                    }
-                    if (pd.args.dim)
-                        buf.writeByte(')');
-                    global.endGagging(errors_save);
-                }
-                message("pragma    %s", buf.peekChars());
-            }
-        }
-        else
             error(pd.loc, "unrecognized `pragma(%s)`", pd.ident.toChars());
-    Ldecl:
-        if (pd.decl)
+            return declarations();
+        }
+
+        if (!global.params.verbose)
+            return declarations();
+
+        /* Print unrecognized pragmas
+         */
+        OutBuffer buf;
+        buf.writestring(pd.ident.toString());
+        if (pd.args)
         {
-            Scope* sc2 = pd.newScope(sc);
-            for (size_t i = 0; i < pd.decl.dim; i++)
+            const errors_save = global.startGagging();
+            for (size_t i = 0; i < pd.args.dim; i++)
             {
-                Dsymbol s = (*pd.decl)[i];
-                s.dsymbolSemantic(sc2);
-                if (pd.ident == Id.mangle)
-                {
-                    assert(pd.args && pd.args.dim == 1);
-                    if (auto se = (*pd.args)[0].toStringExp())
-                    {
-                        const name = (cast(const(char)[])se.peekData()).xarraydup;
-                        uint cnt = setMangleOverride(s, name);
-                        if (cnt > 1)
-                            pd.error("can only apply to a single declaration");
-                    }
-                }
+                Expression e = (*pd.args)[i];
+                sc = sc.startCTFE();
+                e = e.expressionSemantic(sc);
+                e = resolveProperties(sc, e);
+                sc = sc.endCTFE();
+                e = e.ctfeInterpret();
+                if (i == 0)
+                    buf.writestring(" (");
+                else
+                    buf.writeByte(',');
+                buf.writestring(e.toChars());
             }
-            if (sc2 != sc)
-                sc2.pop();
+            if (pd.args.dim)
+                buf.writeByte(')');
+            global.endGagging(errors_save);
         }
-        return;
-    Lnodecl:
-        if (pd.decl)
-        {
-            pd.error("is missing a terminating `;`");
-            goto Ldecl;
-            // do them anyway, to avoid segfaults.
-        }
+        message("pragma    %s", buf.peekChars());
+        return declarations();
     }
 
     override void visit(StaticIfDeclaration sid)
@@ -2200,12 +2229,15 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
             }
             else if (auto se = ns.exp.toStringExp())
                 ns.ident = identFromSE(se);
+            // Empty Tuple
+            else if (ns.exp.isTypeExp() && ns.exp.isTypeExp().type.toBasetype().isTypeTuple())
+            {
+            }
             else
                 ns.exp.error("compile time string constant (or tuple) expected, not `%s`",
                              ns.exp.toChars());
         }
-        if (ns.ident)
-            attribSemantic(ns);
+        attribSemantic(ns);
     }
 
     override void visit(UserAttributeDeclaration uad)
@@ -3266,7 +3298,11 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
         }
         else
             funcdecl.linkage = sc.linkage;
-        funcdecl.inlining = sc.inlining;
+
+        // evaluate pragma(inline)
+        if (auto pragmadecl = sc.inlining)
+            funcdecl.inlining = pragmadecl.evalPragmaInline(sc);
+
         funcdecl.protection = sc.protection;
         funcdecl.userAttribDecl = sc.userAttribDecl;
         UserAttributeDeclaration.checkGNUABITag(funcdecl, funcdecl.linkage);
@@ -3977,6 +4013,7 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
             objc.setSelector(funcdecl, sc);
             objc.checkLinkage(funcdecl);
             objc.addToClassMethodList(funcdecl, cd);
+            objc.setAsOptional(funcdecl, sc);
 
             /* Go through all the interface bases.
              * Disallow overriding any final functions in the interface(s).
@@ -4016,9 +4053,13 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
             funcdecl.error("`override` only applies to class member functions");
 
         if (auto ti = parent.isTemplateInstance)
+        {
             objc.setSelector(funcdecl, sc);
+            objc.setAsOptional(funcdecl, sc);
+        }
 
         objc.validateSelector(funcdecl);
+        objc.validateOptional(funcdecl);
         // Reflect this.type to f because it could be changed by findVtblIndex
         f = funcdecl.type.toTypeFunction();
 
@@ -4102,7 +4143,7 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
             if (cmainTemplateExists())
             {
                 // add `mixin _d_cmain!();` to the declaring module
-                auto tqual = Pool!TypeIdentifier.make(funcdecl.loc, Id.CMain);
+                auto tqual = new TypeIdentifier(funcdecl.loc, Id.CMain);
                 auto tm = new TemplateMixin(funcdecl.loc, null, tqual, null);
                 sc._module.members.push(tm);
             }
@@ -4871,47 +4912,6 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
 
     override void visit(ClassDeclaration cldec)
     {
-        /// Checks that the given class implements all methods of its interfaces.
-        static void checkInterfaceImplementations(ClassDeclaration cd)
-        {
-            foreach (base; cd.interfaces)
-            {
-                // first entry is ClassInfo reference
-                auto methods = base.sym.vtbl[base.sym.vtblOffset .. $];
-
-                foreach (m; methods)
-                {
-                    auto ifd = m.isFuncDeclaration;
-                    assert(ifd);
-
-                    auto type = ifd.type.toTypeFunction();
-                    auto fd = cd.findFunc(ifd.ident, type);
-
-                    if (fd && !fd.isAbstract)
-                    {
-                        //printf("            found\n");
-                        // Check that calling conventions match
-                        if (fd.linkage != ifd.linkage)
-                            fd.error("linkage doesn't match interface function");
-
-                        // Check that it is current
-                        //printf("newinstance = %d fd.toParent() = %s ifd.toParent() = %s\n",
-                            //newinstance, fd.toParent().toChars(), ifd.toParent().toChars());
-                        if (fd.toParent() != cd && ifd.toParent() == base.sym)
-                            cd.error("interface function `%s` is not implemented", ifd.toFullSignature());
-                    }
-
-                    else
-                    {
-                        //printf("            not found %p\n", fd);
-                        // BUG: should mark this class as abstract?
-                        if (!cd.isAbstract())
-                            cd.error("interface function `%s` is not implemented", ifd.toFullSignature());
-                    }
-                }
-            }
-        }
-
         //printf("ClassDeclaration.dsymbolSemantic(%s), type = %p, sizeok = %d, this = %p\n", cldec.toChars(), cldec.type, cldec.sizeok, this);
         //printf("\tparent = %p, '%s'\n", sc.parent, sc.parent ? sc.parent.toChars() : "");
         //printf("sc.stc = %x\n", sc.stc);
@@ -5556,8 +5556,6 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
         if (0 &&          // deprecation disabled for now to accommodate existing extensive use
             cldec.storage_class & STC.scope_)
             deprecation(cldec.loc, "`scope` as a type constraint is deprecated.  Use `scope` at the usage site.");
-
-        checkInterfaceImplementations(cldec);
     }
 
     override void visit(InterfaceDeclaration idec)
@@ -5685,10 +5683,7 @@ private extern(C++) final class DsymbolSemanticVisitor : Visitor
             UserAttributeDeclaration.checkGNUABITag(idec, sc.linkage);
 
             if (sc.linkage == LINK.objc)
-            {
                 objc.setObjc(idec);
-                objc.deprecate(idec);
-            }
 
             // Check for errors, handle forward references
             BCLoop:
@@ -5929,17 +5924,6 @@ void templateInstanceSemantic(TemplateInstance tempinst, Scope* sc, Expressions*
     {
         tempinst.minst = null;
     }
-    // https://issues.dlang.org/show_bug.cgi?id=21299
-    // If not speculative, this instance should have the same instantiating
-    // root module as its enclosing template symbol. This can differ when
-    // the enclosing template gets changed from non-root to a root instance
-    // in the instantiation graph. When that occurs, this instance also
-    // needs to be appended to the root module, otherwise there will be
-    // undefined references at link-time.
-    if (tempinst.minst && tempinst.tinst)
-    {
-        tempinst.minst = tempinst.tinst.minst;
-    }
 
     tempinst.gagged = (global.gag > 0);
 
@@ -5995,7 +5979,7 @@ void templateInstanceSemantic(TemplateInstance tempinst, Scope* sc, Expressions*
     if (tempdecl.isTrivialAliasSeq)
     {
         tempinst.inst = tempinst;
-        return aliasSeqInstanceSemantic(tempinst, sc, fargs, tempdecl);
+        return aliasSeqInstanceSemantic(tempinst, sc, tempdecl);
     }
 
     /* Greatly simplified semantic processing for Alias templates
@@ -6003,7 +5987,7 @@ void templateInstanceSemantic(TemplateInstance tempinst, Scope* sc, Expressions*
     else if (tempdecl.isTrivialAlias)
     {
         tempinst.inst = tempinst;
-        return aliasInstanceSemantic(tempinst, sc, fargs, tempdecl);
+        return aliasInstanceSemantic(tempinst, sc, tempdecl);
     }
 
     /* See if there is an existing TemplateInstantiation that already
@@ -6058,17 +6042,18 @@ void templateInstanceSemantic(TemplateInstance tempinst, Scope* sc, Expressions*
         if (tempinst.minst && tempinst.minst.isRoot() && !(tempinst.inst.minst && tempinst.inst.minst.isRoot()))
         {
             /* Swap the position of 'inst' and 'this' in the instantiation graph.
-             * Then, the primary instance `inst` will be changed to a root instance.
+             * Then, the primary instance `inst` will be changed to a root instance,
+             * along with all members of `inst` having their scopes updated.
              *
              * Before:
-             *  non-root -> A!() -> B!()[inst] -> C!()
+             *  non-root -> A!() -> B!()[inst] -> C!() { members[non-root] }
              *                      |
              *  root     -> D!() -> B!()[this]
              *
              * After:
              *  non-root -> A!() -> B!()[this]
              *                      |
-             *  root     -> D!() -> B!()[inst] -> C!()
+             *  root     -> D!() -> B!()[inst] -> C!() { members[root] }
              */
             Module mi = tempinst.minst;
             TemplateInstance ti = tempinst.tinst;
@@ -6076,6 +6061,53 @@ void templateInstanceSemantic(TemplateInstance tempinst, Scope* sc, Expressions*
             tempinst.tinst = tempinst.inst.tinst;
             tempinst.inst.minst = mi;
             tempinst.inst.tinst = ti;
+
+            /* https://issues.dlang.org/show_bug.cgi?id=21299
+               `minst` has been updated on the primary instance `inst` so it is
+               now coming from a root module, however all Dsymbol `inst.members`
+               of the instance still have their `_scope.minst` pointing at the
+               original non-root module. We must now propagate `minst` to all
+               members so that forward referenced dependencies that get
+               instantiated will also be appended to the root module, otherwise
+               there will be undefined references at link-time.  */
+            extern (C++) final class InstMemberWalker : Visitor
+            {
+                alias visit = Visitor.visit;
+                TemplateInstance inst;
+
+                extern (D) this(TemplateInstance inst)
+                {
+                    this.inst = inst;
+                }
+
+                override void visit(Dsymbol d)
+                {
+                    if (d._scope)
+                        d._scope.minst = inst.minst;
+                }
+
+                override void visit(ScopeDsymbol sds)
+                {
+                    sds.members.foreachDsymbol( s => s.accept(this) );
+                    visit(cast(Dsymbol)sds);
+                }
+
+                override void visit(AttribDeclaration ad)
+                {
+                    ad.include(null).foreachDsymbol( s => s.accept(this) );
+                    visit(cast(Dsymbol)ad);
+                }
+
+                override void visit(ConditionalDeclaration cd)
+                {
+                    if (cd.condition.inc)
+                        visit(cast(AttribDeclaration)cd);
+                    else
+                        visit(cast(Dsymbol)cd);
+                }
+            }
+            scope v = new InstMemberWalker(tempinst.inst);
+            tempinst.inst.accept(v);
 
             if (tempinst.minst) // if inst was not speculative
             {
@@ -6475,7 +6507,7 @@ Laftersemantic:
  * This is a greatly simplified version of templateInstanceSemantic().
  */
 private
-void aliasSeqInstanceSemantic(TemplateInstance tempinst, Scope* sc, Expressions* fargs, TemplateDeclaration tempdecl)
+void aliasSeqInstanceSemantic(TemplateInstance tempinst, Scope* sc, TemplateDeclaration tempdecl)
 {
     //printf("[%s] aliasSeqInstance.dsymbolSemantic('%s')\n", tempinst.loc.toChars(), tempinst.toChars());
     Scope* paramscope = sc.push();
@@ -6500,7 +6532,7 @@ void aliasSeqInstanceSemantic(TemplateInstance tempinst, Scope* sc, Expressions*
  * This is a greatly simplified version of templateInstanceSemantic().
  */
 private
-void aliasInstanceSemantic(TemplateInstance tempinst, Scope* sc, Expressions* fargs, TemplateDeclaration tempdecl)
+void aliasInstanceSemantic(TemplateInstance tempinst, Scope* sc, TemplateDeclaration tempdecl)
 {
     //printf("[%s] aliasInstance.dsymbolSemantic('%s')\n", tempinst.loc.toChars(), tempinst.toChars());
     Scope* paramscope = sc.push();
@@ -6534,8 +6566,19 @@ void aliasSemantic(AliasDeclaration ds, Scope* sc)
     // TypeTraits needs to know if it's located in an AliasDeclaration
     const oldflags = sc.flags;
     sc.flags |= SCOPE.alias_;
-    scope(exit)
+
+    void normalRet()
+    {
         sc.flags = oldflags;
+    }
+
+    void errorRet()
+    {
+        ds.aliassym = null;
+        ds.type = Type.terror;
+        ds.inuse = 0;
+        normalRet();
+    }
 
     // preserve the original type
     if (!ds.originalType && ds.type)
@@ -6548,39 +6591,35 @@ void aliasSemantic(AliasDeclaration ds, Scope* sc)
         if (fd || td && td.literal)
         {
             if (fd && fd.semanticRun >= PASS.semanticdone)
-                return;
+                return normalRet();
 
             Expression e = new FuncExp(ds.loc, ds.aliassym);
             e = e.expressionSemantic(sc);
-            if (e.op == TOK.function_)
+            if (auto fe = e.isFuncExp())
             {
-                FuncExp fe = cast(FuncExp)e;
                 ds.aliassym = fe.td ? cast(Dsymbol)fe.td : fe.fd;
+                return normalRet();
             }
             else
-            {
-                ds.aliassym = null;
-                ds.type = Type.terror;
-            }
-            return;
+                return errorRet();
         }
 
         if (ds.aliassym.isTemplateInstance())
             ds.aliassym.dsymbolSemantic(sc);
-        return;
+        return normalRet();
     }
     ds.inuse = 1;
 
     // Given:
     //  alias foo.bar.abc def;
-    // it is not knowable from the syntax whether this is an alias
-    // for a type or an alias for a symbol. It is up to the semantic()
+    // it is not knowable from the syntax whether `def` is an alias
+    // for type `foo.bar.abc` or an alias for symbol `foo.bar.abc`. It is up to the semantic()
     // pass to distinguish.
-    // If it is a type, then type is set and getType() will return that
-    // type. If it is a symbol, then aliassym is set and type is NULL -
-    // toAlias() will return aliasssym.
+    // If it is a type, then `.type` is set and getType() will return that
+    // type. If it is a symbol, then `.aliassym` is set and type is `null` -
+    // toAlias() will return `.aliasssym`
 
-    uint errors = global.errors;
+    const errors = global.errors;
     Type oldtype = ds.type;
 
     // Ungag errors when not instantiated DeclDefs scope alias
@@ -6594,15 +6633,17 @@ void aliasSemantic(AliasDeclaration ds, Scope* sc)
 
     // https://issues.dlang.org/show_bug.cgi?id=18480
     // Detect `alias sym = sym;` to prevent creating loops in overload overnext lists.
-    // Selective imports are allowed to alias to the same name `import mod : sym=sym`.
-    if (ds.type.ty == Tident && !ds._import)
+    if (auto tident = ds.type.isTypeIdentifier())
     {
-        auto tident = cast(TypeIdentifier)ds.type;
-        if (tident.ident is ds.ident && !tident.idents.dim)
+        // Selective imports are allowed to alias to the same name `import mod : sym=sym`.
+        if (!ds._import)
         {
-            error(ds.loc, "`alias %s = %s;` cannot alias itself, use a qualified name to create an overload set",
-                ds.ident.toChars(), tident.ident.toChars());
-            ds.type = Type.terror;
+            if (tident.ident is ds.ident && !tident.idents.dim)
+            {
+                error(ds.loc, "`alias %s = %s;` cannot alias itself, use a qualified name to create an overload set",
+                    ds.ident.toChars(), tident.ident.toChars());
+                ds.type = Type.terror;
+            }
         }
     }
     /* This section is needed because Type.resolve() will:
@@ -6612,15 +6653,11 @@ void aliasSemantic(AliasDeclaration ds, Scope* sc)
      */
     auto s = ds.type.toDsymbol(sc);
     if (errors != global.errors)
-    {
-        s = null;
-        ds.type = Type.terror;
-    }
-    if (s && s == ds)
+        return errorRet();
+    if (s == ds)
     {
         ds.error("cannot resolve");
-        s = null;
-        ds.type = Type.terror;
+        return errorRet();
     }
     if (!s || !s.isEnumMember())
     {
@@ -6635,7 +6672,7 @@ void aliasSemantic(AliasDeclaration ds, Scope* sc)
             sc2.stc |= ds.storage_class & (STC.ref_ | STC.nothrow_ | STC.nogc | STC.pure_ | STC.shared_ | STC.disable);
         }
         ds.type = ds.type.addSTC(ds.storage_class);
-        ds.type.resolve(ds.loc, sc2, &e, &t, &s);
+        ds.type.resolve(ds.loc, sc2, e, t, s);
         if (sc2 != sc)
             sc2.pop();
 
@@ -6651,7 +6688,7 @@ void aliasSemantic(AliasDeclaration ds, Scope* sc)
                 {
                     if (e.op != TOK.error)
                         ds.error("cannot alias an expression `%s`", e.toChars());
-                    t = Type.terror;
+                    return errorRet();
                 }
             }
         }
@@ -6660,26 +6697,23 @@ void aliasSemantic(AliasDeclaration ds, Scope* sc)
     if (s == ds)
     {
         assert(global.errors);
-        ds.type = Type.terror;
-        s = null;
+        return errorRet();
     }
-    if (!s) // it's a type alias
-    {
-        //printf("alias %s resolved to type %s\n", toChars(), type.toChars());
-        ds.type = ds.type.typeSemantic(ds.loc, sc);
-        ds.aliassym = null;
-    }
-    else    // it's a symbolic alias
+    if (s) // it's a symbolic alias
     {
         //printf("alias %s resolved to %s %s\n", toChars(), s.kind(), s.toChars());
         ds.type = null;
         ds.aliassym = s;
     }
-    if (global.gag && errors != global.errors)
+    else    // it's a type alias
     {
-        ds.type = Type.terror;
+        //printf("alias %s resolved to type %s\n", toChars(), type.toChars());
+        ds.type = ds.type.typeSemantic(ds.loc, sc);
         ds.aliassym = null;
     }
+
+    if (global.gag && errors != global.errors)
+        return errorRet();
     ds.inuse = 0;
     ds.semanticRun = PASS.semanticdone;
 
@@ -6689,4 +6723,156 @@ void aliasSemantic(AliasDeclaration ds, Scope* sc)
         if (!ds.overloadInsert(sx))
             ScopeDsymbol.multiplyDefined(Loc.initial, sx, ds);
     }
+    normalRet();
 }
+
+// function used to perform semantic on AliasDeclaration
+private void aliasAssignSemantic(AliasAssign ds, Scope* sc)
+{
+    //printf("AliasAssign::semantic() %p,  %s\n", ds, ds.ident.toChars());
+
+    void errorRet()
+    {
+        ds.errors = true;
+        ds.type = Type.terror;
+        ds.semanticRun = PASS.semanticdone;
+        return;
+    }
+
+    Dsymbol scopesym;
+    Dsymbol as = sc.search(ds.loc, ds.ident, &scopesym);
+    if (!as)
+    {
+        ds.error("undefined identifier `%s`", ds.ident.toChars());
+        return errorRet();
+    }
+    if (as.errors)
+    {
+        return errorRet();
+    }
+
+    AliasDeclaration aliassym = as.isAliasDeclaration();
+    if (!aliassym)
+    {
+        ds.error("identifier `%s` must be an alias declaration", as.toChars());
+        return errorRet();
+    }
+
+    if (aliassym.overnext)
+    {
+        ds.error("cannot reassign overloaded alias");
+        return errorRet();
+    }
+
+    auto aliassymParent = aliassym.toParent();
+    if (aliassymParent != ds.toParent())
+    {
+        ds.error("must have same parent `%s` as alias `%s`", aliassymParent.toChars(), aliassym.toChars());
+        return errorRet();
+    }
+    if (!aliassymParent.isTemplateInstance())
+    {
+        ds.error("must be a member of a template");
+        return errorRet();
+    }
+
+    if (!aliassym.type)
+    {
+        ds.error("alias assignment can only apply to type aliases");
+        return errorRet();
+    }
+
+    if (aliassym.adFlags & Declaration.wasRead)
+    {
+        if (!aliassym.errors)
+            error(ds.loc, "%s was read, so cannot reassign", aliassym.toChars());
+        aliassym.errors = true;
+        return errorRet();
+    }
+
+    const errors = global.errors;
+    aliassym.adFlags |= Declaration.ignoreRead; // temporarilly allow reads of aliassym
+
+    const storage_class = sc.stc & (STC.deprecated_ | STC.ref_ | STC.nothrow_ | STC.nogc | STC.pure_ | STC.shared_ | STC.disable);
+
+//<<>>
+    /* This section is needed because Type.resolve() will:
+     *   const x = 3;
+     *   alias y = x;
+     * try to convert identifier x to 3.
+     */
+    auto s = ds.type.toDsymbol(sc);
+    if (errors != global.errors)
+        return errorRet();
+    if (s == aliassym)
+    {
+        ds.error("cannot resolve");
+        return errorRet();
+    }
+
+    if (!s || !s.isEnumMember())
+    {
+        Type t;
+        Expression e;
+        Scope* sc2 = sc;
+        if (storage_class & (STC.ref_ | STC.nothrow_ | STC.nogc | STC.pure_ | STC.shared_ | STC.disable))
+        {
+            // For 'ref' to be attached to function types, and picked
+            // up by Type.resolve(), it has to go into sc.
+            sc2 = sc.push();
+            sc2.stc |= storage_class & (STC.ref_ | STC.nothrow_ | STC.nogc | STC.pure_ | STC.shared_ | STC.disable);
+        }
+        ds.type = ds.type.addSTC(storage_class);
+        ds.type.resolve(ds.loc, sc2, e, t, s);
+        if (sc2 != sc)
+            sc2.pop();
+
+        if (e)  // Try to convert Expression to Dsymbol
+        {
+            s = getDsymbol(e);
+            if (!s)
+            {
+                if (e.op != TOK.error)
+                    ds.error("cannot alias an expression `%s`", e.toChars());
+                return errorRet();
+            }
+        }
+        ds.type = t;
+    }
+    if (s == aliassym)
+    {
+        assert(global.errors);
+        return errorRet();
+    }
+
+    if (s) // it's a symbolic alias
+    {
+        //printf("alias %s resolved to %s %s\n", toChars(), s.kind(), s.toChars());
+        aliassym.type = null;
+        aliassym.aliassym = s;
+
+        aliassym.storage_class |= sc.stc & STC.deprecated_;
+        aliassym.protection = sc.protection;
+        aliassym.userAttribDecl = sc.userAttribDecl;
+    }
+    else    // it's a type alias
+    {
+        //printf("alias %s resolved to type %s\n", toChars(), type.toChars());
+        aliassym.type = ds.type.typeSemantic(ds.loc, sc);
+        aliassym.aliassym = null;
+    }
+
+
+    aliassym.adFlags &= ~Declaration.ignoreRead;
+
+    if (aliassym.type && aliassym.type.ty == Terror ||
+        global.gag && errors != global.errors)
+    {
+        aliassym.type = Type.terror;
+        aliassym.aliassym = null;
+        return errorRet();
+    }
+
+    ds.semanticRun = PASS.semanticdone;
+}
+

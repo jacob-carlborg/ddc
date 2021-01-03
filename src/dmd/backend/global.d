@@ -103,12 +103,7 @@ else
 Symbol *asm_define_label(const(char)* id);
 
 // cpp.c
-version (SCPP)
-    const(char)* cpp_mangle(Symbol* s);
-else version (MARS)
-    const(char)* cpp_mangle(Symbol* s);
-else
-    const(char)* cpp_mangle(Symbol* s) { return &s.Sident[0]; }
+const(char)* cpp_mangle(Symbol* s);
 
 // ee.c
 void eecontext_convs(SYMIDX marksi);
@@ -170,7 +165,6 @@ void parc_free(void *p);
 
 void swap(int *, int *);
 //void crlf(FILE *);
-char *unsstr(uint);
 int isignore(int);
 int isillegal(int);
 
@@ -355,7 +349,7 @@ int baseclass_nitems(baseclass_t *b);
 void symbol_free(Symbol *s);
 SYMIDX symbol_add(Symbol *s);
 SYMIDX symbol_add(ref symtab_t, Symbol *s);
-SYMIDX symbol_insert(symtab_t*, Symbol *s, SYMIDX n);
+SYMIDX symbol_insert(ref symtab_t, Symbol *s, SYMIDX n);
 void freesymtab(Symbol **stab, SYMIDX n1, SYMIDX n2);
 Symbol *symbol_copy(Symbol *s);
 Symbol *symbol_searchlist(symlist_t sl, const(char)* vident);
@@ -527,7 +521,7 @@ void dwarf_CFA_set_reg_offset(int reg, int offset);
 void dwarf_CFA_offset(int reg, int offset);
 void dwarf_CFA_args_size(size_t sz);
 
-// TARGET_LINUX || TARGET_OSX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_DRAGONFLYBSD || TARGET_SOLARIS
+// Posix
 elem *exp_isconst();
 elem *lnx_builtin_next_arg(elem *efunc,list_t arglist);
 char *lnx_redirect_funcname(const(char)*);

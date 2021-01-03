@@ -39,6 +39,8 @@ import dmd.backend.symtab;
 import dmd.backend.ty;
 import dmd.backend.type;
 
+import dmd.backend.barray;
+
 version (SCPP)
 {
     import cpp;
@@ -278,7 +280,12 @@ version (SCPP)
                     searchfixlist(s);
                     if (config.fulltypes &&
                         !(s.Sclass == SCstatic && funcsym_p)) // not local static
-                        cv_outsym(s);
+                    {
+                        if (config.objfmt == OBJ_ELF || config.objfmt == OBJ_MACH)
+                            dwarf_outsym(s);
+                        else
+                            cv_outsym(s);
+                    }
 version (SCPP)
 {
                     out_extdef(s);
@@ -338,6 +345,10 @@ version (SCPP)
 
             case mTYthread:
                 s.Sfl = FLtlsdata;
+                break;
+
+            case mTYweakLinkage:
+                s.Sfl = FLdata;        // initialized data
                 break;
 
             default:
@@ -410,7 +421,12 @@ version (SCPP)
     assert(s.Sseg != UNKNOWN);
     if (config.fulltypes &&
         !(s.Sclass == SCstatic && funcsym_p)) // not local static
-        cv_outsym(s);
+    {
+        if (config.objfmt == OBJ_ELF || config.objfmt == OBJ_MACH)
+            dwarf_outsym(s);
+        else
+            cv_outsym(s);
+    }
     searchfixlist(s);
 
     /* Go back through list, now that we know its size, and send out    */
@@ -457,7 +473,7 @@ void dt_writeToObj(Obj objmod, dt_t *dt, int seg, ref targ_size_t offset)
                     objmod.reftocodeseg(seg,offset,dt.DTabytes);
                 else
                 {
-static if (TARGET_LINUX || TARGET_OSX || TARGET_FREEBSD || TARGET_OPENBSD || TARGET_DRAGONFLYBSD || TARGET_SOLARIS)
+if (config.exe & EX_posix)
 {
                     objmod.reftodatseg(seg,offset,dt.DTabytes,dt.DTseg,flags);
 }
@@ -599,7 +615,12 @@ version (SCPP)
                 objmod.common_block(s, 0, n, 1);
         }
         if (config.fulltypes)
-            cv_outsym(s);
+        {
+            if (config.objfmt == OBJ_ELF || config.objfmt == OBJ_MACH)
+                dwarf_outsym(s);
+            else
+                cv_outsym(s);
+        }
     }
 }
 
@@ -970,7 +991,7 @@ void out_regcand(symtab_t *psymtab)
     //printf("out_regcand()\n");
     const bool ifunc = (tybasic(funcsym_p.ty()) == TYifunc);
     for (SYMIDX si = 0; si < psymtab.length; si++)
-    {   Symbol *s = psymtab.tab[si];
+    {   Symbol *s = (*psymtab)[si];
 
         symbol_debug(s);
         //assert(sytab[s.Sclass] & SCSS);      // only stack variables
@@ -992,7 +1013,7 @@ void out_regcand(symtab_t *psymtab)
         // Any assembler blocks make everything ambiguous
         if (b.BC == BCasm)
             for (SYMIDX si = 0; si < psymtab.length; si++)
-                psymtab.tab[si].Sflags &= ~(SFLunambig | GTregcand);
+                (*psymtab)[si].Sflags &= ~(SFLunambig | GTregcand);
     }
 
     // If we took the address of one parameter, assume we took the
@@ -1000,8 +1021,8 @@ void out_regcand(symtab_t *psymtab)
     if (addressOfParam)                      // if took address of a parameter
     {
         for (SYMIDX si = 0; si < psymtab.length; si++)
-            if (psymtab.tab[si].Sclass == SCparameter || psymtab.tab[si].Sclass == SCshadowreg)
-                psymtab.tab[si].Sflags &= ~(SFLunambig | GTregcand);
+            if ((*psymtab)[si].Sclass == SCparameter || (*psymtab)[si].Sclass == SCshadowreg)
+                (*psymtab)[si].Sflags &= ~(SFLunambig | GTregcand);
     }
 
 }
@@ -1164,7 +1185,8 @@ version (SCPP)
     debug debugy && printf("appending symbols to symtab...\n");
     const nsymbols = f.Flocsym.length;
     globsym.setLength(nsymbols);
-    memcpy(&globsym.tab[0],&f.Flocsym.tab[0],nsymbols * (Symbol *).sizeof);
+    foreach (si; 0 .. nsymbols)
+        globsym[si] = f.Flocsym[si];
 
     assert(startblock == null);
     if (f.Fflags & Finline)            // if keep function around
@@ -1407,23 +1429,14 @@ version (SCPP)
             objmod.comdat(sfunc);
             cseg = sfunc.Sseg;
         }
-        else
-            if (config.flags & CFGsegs) // if user set switch for this
-            {
-version (SCPP)
-{
+        else if (config.flags & CFGsegs) // if user set switch for this
+        {
+            version (SCPP)
                 objmod.codeseg(cpp_mangle(funcsym_p),1);
-}
-else static if (TARGET_WINDOS)
-{
-                objmod.codeseg(cast(char*)cpp_mangle(funcsym_p),1);
-}
-else
-{
-                objmod.codeseg(funcsym_p.Sident.ptr, 1);
-}
+            else
+                objmod.codeseg(&funcsym_p.Sident[0], 1);
                                         // generate new code segment
-            }
+        }
         cod3_align(cseg);               // align start of function
 version (HTOD) { } else
 {
@@ -1545,7 +1558,10 @@ version (Win32)
         objmod.export_symbol(sfunc,cast(uint)Para.offset);      // export function definition
 
     if (config.fulltypes && config.fulltypes != CV8)
-        cv_func(sfunc);                 // debug info for function
+    {
+        if (config.objfmt == OBJ_OMF || config.objfmt == OBJ_MSCOFF)
+            cv_func(sfunc);                 // debug info for function
+    }
 
 version (MARS)
 {
@@ -1605,9 +1621,9 @@ Ldone:
 version (SCPP)
 {
     // Free any added symbols
-    freesymtab(globsym.tab,nsymbols,globsym.length);
+    freesymtab(globsym[].ptr,nsymbols,globsym.length);
 }
-    globsym.length = 0;
+    globsym.setLength(0);
 
     //printf("done with writefunc()\n");
     //dfo.dtor();       // save allocation for next time

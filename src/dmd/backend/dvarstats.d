@@ -22,6 +22,7 @@ import dmd.backend.cdef;
 import dmd.backend.global;
 import dmd.backend.code;
 import dmd.backend.symtab;
+import dmd.backend.barray;
 
 extern (C++):
 
@@ -74,22 +75,20 @@ struct VarStatistics
 {
 private:
 nothrow:
-    LifeTime[] lifeTimes;
-    int cntUsedLifeTimes;
+    Barray!LifeTime lifeTimes;
 
     // symbol table sorted by offset of variable creation
     symtab_t sortedSymtab;
-    SYMIDX* nextSym;      // next symbol with identifier with same hash, same size as sortedSymtab
+    Barray!SYMIDX nextSym;      // next symbol with identifier with same hash, same size as sortedSymtab
     int uniquecnt;        // number of variables that have unique name and don't need lexical scope
 
     // line number records for the current function
-    LineOffset[] lineOffsets;
-    int cntUsedLineOffsets;
+    Barray!LineOffset lineOffsets;
     const(char)* srcfile;  // only one file supported, no inline
 
 public void startFunction()
 {
-    cntUsedLineOffsets = 0;
+    lineOffsets.setLength(0);
     srcfile = null;
 }
 
@@ -120,7 +119,7 @@ private extern (C) static int cmpLifeTime(scope const void* p1, scope const void
 }
 
 // a parent scope contains the creation offset of the child scope
-private static extern(D) SYMIDX isParentScope(LifeTime[] lifetimes, SYMIDX parent, SYMIDX si)
+private static extern(D) SYMIDX isParentScope(ref Barray!LifeTime lifetimes, SYMIDX parent, SYMIDX si)
 {
     if (parent == SYMIDX.max) // full function
         return true;
@@ -129,7 +128,7 @@ private static extern(D) SYMIDX isParentScope(LifeTime[] lifetimes, SYMIDX paren
 }
 
 // find a symbol that includes the creation of the given symbol as part of its life time
-private static extern(D) SYMIDX findParentScope(LifeTime[] lifetimes, SYMIDX si)
+private static extern(D) SYMIDX findParentScope(ref Barray!LifeTime lifetimes, SYMIDX si)
 {
     if (si != SYMIDX.max)
     {
@@ -177,9 +176,9 @@ private bool hashSymbolIdentifiers(ref symtab_t symtab)
 
 private bool hasUniqueIdentifier(ref symtab_t symtab, SYMIDX si)
 {
-    Symbol* sa = symtab.tab[si];
+    Symbol* sa = symtab[si];
     for (SYMIDX sj = nextSym[si]; sj != si; sj = nextSym[sj])
-        if (strcmp(sa.Sident.ptr, symtab.tab[sj].Sident.ptr) == 0)
+        if (strcmp(sa.Sident.ptr, symtab[sj].Sident.ptr) == 0)
             return false;
     return true;
 }
@@ -192,9 +191,9 @@ private symtab_t* calcLexicalScope(return ref symtab_t symtab) return
     // - arguments should be kept at the very beginning
     // - variables with unique name come first (will be emitted with full function scope)
     // - variables with duplicate names are added with ascending code offset
+    nextSym.setLength(symtab.length);
     if (sortedSymtab.symmax < symtab.length)
     {
-        nextSym = cast(SYMIDX*)util_realloc(nextSym, symtab.length, (*nextSym).sizeof);
         sortedSymtab.tab = cast(Symbol**) util_realloc(sortedSymtab.tab, symtab.length, (Symbol*).sizeof);
         sortedSymtab.symmax = symtab.length;
     }
@@ -210,10 +209,10 @@ private symtab_t* calcLexicalScope(return ref symtab_t symtab) return
     SYMIDX argcnt;
     for (argcnt = 0; argcnt < symtab.length; argcnt++)
     {
-        Symbol* sa = symtab.tab[argcnt];
+        Symbol* sa = symtab[argcnt];
         if (sa.Sclass != SCparameter && sa.Sclass != SCregpar && sa.Sclass != SCfastpar && sa.Sclass != SCshadowreg)
             break;
-        sortedSymtab.tab[argcnt] = sa;
+        sortedSymtab[argcnt] = sa;
     }
 
     // find symbols with identical names, only these need lexical scope
@@ -221,11 +220,11 @@ private symtab_t* calcLexicalScope(return ref symtab_t symtab) return
     SYMIDX dupcnt = 0;
     for (SYMIDX sj, si = argcnt; si < symtab.length; si++)
     {
-        Symbol* sa = symtab.tab[si];
+        Symbol* sa = symtab[si];
         if (!isLexicalScopeVar(sa) || hasUniqueIdentifier(symtab, si))
-            sortedSymtab.tab[uniquecnt++] = sa;
+            sortedSymtab[uniquecnt++] = sa;
         else
-            sortedSymtab.tab[symtab.length - 1 - dupcnt++] = sa; // fill from the top
+            sortedSymtab[symtab.length - 1 - dupcnt++] = sa; // fill from the top
     }
     sortedSymtab.length = symtab.length;
     if(dupcnt == 0)
@@ -234,8 +233,7 @@ private symtab_t* calcLexicalScope(return ref symtab_t symtab) return
     sortLineOffsets();
 
     // precalc the lexical blocks to emit so that identically named symbols don't overlap
-    if (lifeTimes.length < dupcnt)
-        lifeTimes = (cast(LifeTime*) util_realloc(lifeTimes.ptr, dupcnt, (LifeTime).sizeof))[0 .. dupcnt];
+    lifeTimes.setLength(dupcnt);
 
     for (SYMIDX si = 0; si < dupcnt; si++)
     {
@@ -243,8 +241,7 @@ private symtab_t* calcLexicalScope(return ref symtab_t symtab) return
         lifeTimes[si].offCreate = cast(int)getLineOffset(lifeTimes[si].sym.lnoscopestart);
         lifeTimes[si].offDestroy = cast(int)getLineOffset(lifeTimes[si].sym.lnoscopeend);
     }
-    cntUsedLifeTimes = cast(int)dupcnt;
-    qsort(lifeTimes.ptr, dupcnt, (lifeTimes[0]).sizeof, &cmpLifeTime);
+    qsort(lifeTimes[].ptr, dupcnt, (lifeTimes[0]).sizeof, &cmpLifeTime);
 
     // ensure that an inner block does not extend beyond the end of a parent block
     for (SYMIDX si = 0; si < dupcnt; si++)
@@ -348,27 +345,27 @@ private extern (C) static int cmpLineOffsets(scope const void* off1, scope const
 
 private void sortLineOffsets()
 {
-    if (cntUsedLineOffsets == 0)
+    if (lineOffsets.length == 0)
         return;
 
     // remember the offset to the next recorded offset on another line
-    for (int i = 1; i < cntUsedLineOffsets; i++)
+    for (int i = 1; i < lineOffsets.length; i++)
         lineOffsets[i-1].diffNextOffset = cast(uint)(lineOffsets[i].offset - lineOffsets[i-1].offset);
-    lineOffsets[cntUsedLineOffsets - 1].diffNextOffset = cast(uint)(retoffset + retsize - lineOffsets[cntUsedLineOffsets - 1].offset);
+    lineOffsets[lineOffsets.length - 1].diffNextOffset = cast(uint)(retoffset + retsize - lineOffsets[lineOffsets.length - 1].offset);
 
     // sort line records and remove duplicate lines preferring smaller offsets
-    qsort(lineOffsets.ptr, cntUsedLineOffsets, (lineOffsets[0]).sizeof, &cmpLineOffsets);
+    qsort(lineOffsets[].ptr, lineOffsets.length, (lineOffsets[0]).sizeof, &cmpLineOffsets);
     int j = 0;
-    for (int i = 1; i < cntUsedLineOffsets; i++)
+    for (int i = 1; i < lineOffsets.length; i++)
         if (lineOffsets[i].linnum > lineOffsets[j].linnum)
             lineOffsets[++j] = lineOffsets[i];
-    cntUsedLineOffsets = j + 1;
+    lineOffsets.setLength(j + 1);
 }
 
 private targ_size_t getLineOffset(int linnum)
 {
     int idx = findLineIndex(linnum);
-    if (idx >= cntUsedLineOffsets || lineOffsets[idx].linnum < linnum)
+    if (idx >= lineOffsets.length || lineOffsets[idx].linnum < linnum)
         return retoffset + retsize; // function length
     if (idx > 0 && lineOffsets[idx].linnum != linnum)
         // for inexact line numbers, use the offset following the previous line
@@ -380,7 +377,7 @@ private targ_size_t getLineOffset(int linnum)
 private int findLineIndex(uint line)
 {
     int low = 0;
-    int high = cntUsedLineOffsets;
+    int high = cast(int)lineOffsets.length;
     while (low < high)
     {
         int mid = (low + high) >> 1;
@@ -413,23 +410,19 @@ public void recordLineOffset(Srcpos src, targ_size_t off)
     // assume ascending code offsets generated during codegen, ignore any other
     //  (e.g. there is an additional line number emitted at the end of the function
     //   or multiple line numbers at the same offset)
-    if (cntUsedLineOffsets > 0 && lineOffsets[cntUsedLineOffsets-1].offset >= off)
+    if (lineOffsets.length > 0 && lineOffsets[lineOffsets.length-1].offset >= off)
         return;
 
-    if (cntUsedLineOffsets > 0 && lineOffsets[cntUsedLineOffsets-1].linnum == src.Slinnum)
+    if (lineOffsets.length > 0 && lineOffsets[lineOffsets.length-1].linnum == src.Slinnum)
     {
         // optimize common case: new offset on same line
         return;
     }
     // don't care for lineOffsets being ordered now, that is taken care of later (calcLexicalScope)
-    if (lineOffsets.length <= cntUsedLineOffsets)
-    {
-        const newSize = 2 * cntUsedLineOffsets + 16;
-        lineOffsets = (cast(LineOffset*) util_realloc(lineOffsets.ptr, newSize, (lineOffsets[0]).sizeof))[0 .. newSize];
-    }
-    lineOffsets[cntUsedLineOffsets].linnum = src.Slinnum;
-    lineOffsets[cntUsedLineOffsets].offset = off;
-    cntUsedLineOffsets++;
+    LineOffset* linoff = lineOffsets.push();
+    linoff.linnum = src.Slinnum;
+    linoff.offset = off;
+    linoff.diffNextOffset = 0;
 }
 
 }

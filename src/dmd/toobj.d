@@ -449,6 +449,11 @@ void toObjFile(Dsymbol ds, bool multiobj)
             // Put out the members
             id.members.foreachDsymbol( (s) { visitNoMultiObj(s); } );
 
+            // Objetive-C protocols are only output if implemented as a class.
+            // If so, they're output via the class declaration.
+            if (id.classKind == ClassKind.objc)
+                return;
+
             // Generate C symbols
             toSymbol(id);
 
@@ -1001,9 +1006,6 @@ void toObjFile(Dsymbol ds, bool multiobj)
             {
                 case LINK.windows:
                     return global.params.is64bit ? mTYman_c : mTYman_std;
-
-                case LINK.pascal:
-                    return mTYman_pas;
 
                 case LINK.objc:
                 case LINK.c:

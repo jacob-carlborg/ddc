@@ -49,7 +49,6 @@ import dmd.mtype;
 import dmd.nogc;
 import dmd.opover;
 import dmd.root.outbuffer;
-import dmd.root.rmem;
 import dmd.root.string;
 import dmd.semantic2;
 import dmd.sideeffect;
@@ -59,6 +58,11 @@ import dmd.tokens;
 import dmd.typesem;
 import dmd.visitor;
 import dmd.compiler;
+
+version (DMDLIB)
+{
+    version = CallbackAPI;
+}
 
 /*****************************************
  * CTFE requires FuncDeclaration::labtab for the interpretation.
@@ -246,6 +250,12 @@ private extern (C++) final class StatementSemanticVisitor : Visitor
                 (*cs.statements)[i] = s;
                 if (s)
                 {
+                    if (s.isErrorStatement())
+                    {
+                        result = s;     // propagate error up the AST
+                        ++i;
+                        continue;       // look for errors in rest of statements
+                    }
                     Statement sentry;
                     Statement sexception;
                     Statement sfinally;
@@ -2433,9 +2443,15 @@ else
             else
             {
                 Expression e = (*ps.args)[0];
-                if (e.op != TOK.int64 || !e.type.equals(Type.tbool))
+                sc = sc.startCTFE();
+                e = e.expressionSemantic(sc);
+                e = resolveProperties(sc, e);
+                sc = sc.endCTFE();
+                e = e.ctfeInterpret();
+                e = e.toBoolean(sc);
+                if (e.isErrorExp())
                 {
-                    ps.error("pragma(inline, true or false) expected, not `%s`", e.toChars());
+                    ps.error("pragma(`inline`, `true` or `false`) expected, not `%s`", (*ps.args)[0].toChars());
                     return setError();
                 }
 
@@ -2474,6 +2490,8 @@ else
     override void visit(StaticAssertStatement s)
     {
         s.sa.semantic2(sc);
+        if (s.sa.errors)
+            return setError();
     }
 
     override void visit(SwitchStatement ss)
@@ -4214,7 +4232,7 @@ else
                 if (!_alias)
                     _alias = name;
 
-                auto tname = Pool!TypeIdentifier.make(s.loc, name);
+                auto tname = new TypeIdentifier(s.loc, name);
                 auto ad = new AliasDeclaration(s.loc, _alias, tname);
                 ad._import = s;
                 s.aliasdecls.push(ad);

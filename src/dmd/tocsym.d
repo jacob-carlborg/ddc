@@ -41,6 +41,7 @@ import dmd.mtype;
 import dmd.target;
 import dmd.toctype;
 import dmd.todt;
+import dmd.toir;
 import dmd.tokens;
 import dmd.typinf;
 import dmd.visitor;
@@ -174,7 +175,7 @@ Symbol *toSymbol(Dsymbol s)
             }
             else if (vd.storage_class & STC.lazy_)
             {
-                if (config.exe == EX_WIN64 && vd.isParameter())
+                if (global.params.targetOS == TargetOS.Windows && global.params.is64bit && vd.isParameter())
                     t = type_fake(TYnptr);
                 else
                     t = type_fake(TYdelegate);          // Tdelegate as C type
@@ -288,10 +289,6 @@ Symbol *toSymbol(Dsymbol s)
                     m = global.params.is64bit ? mTYman_c : mTYman_std;
                     break;
 
-                case LINK.pascal:
-                    m = mTYman_pas;
-                    break;
-
                 case LINK.objc:
                 case LINK.c:
                     m = mTYman_c;
@@ -382,11 +379,6 @@ Symbol *toSymbol(Dsymbol s)
                         t.Tmangle = global.params.is64bit ? mTYman_c : mTYman_std;
                         break;
 
-                    case LINK.pascal:
-                        t.Tty = TYnpfunc;
-                        t.Tmangle = mTYman_pas;
-                        break;
-
                     case LINK.c:
                     case LINK.objc:
                         t.Tmangle = mTYman_c;
@@ -397,7 +389,7 @@ Symbol *toSymbol(Dsymbol s)
                         break;
                     case LINK.cpp:
                         s.Sflags |= SFLpublic;
-                        if (fd.isThis() && !global.params.is64bit && global.params.isWindows)
+                        if (fd.isThis() && !global.params.is64bit && global.params.targetOS == TargetOS.Windows)
                         {
                             if ((cast(TypeFunction)fd.type).parameterList.varargs == VarArg.variadic)
                             {
@@ -491,21 +483,21 @@ Symbol *toImport(Symbol *sym)
     import core.stdc.stdlib : alloca;
     char *id = cast(char *) alloca(6 + strlen(n) + 1 + type_paramsize(sym.Stype).sizeof*3 + 1);
     int idlen;
-    if (config.exe != EX_WIN32 && config.exe != EX_WIN64)
+    if (global.params.targetOS & TargetOS.Posix)
     {
         id = n;
         idlen = cast(int)strlen(n);
     }
     else if (sym.Stype.Tmangle == mTYman_std && tyfunc(sym.Stype.Tty))
     {
-        if (config.exe == EX_WIN64)
+        if (global.params.targetOS == TargetOS.Windows && global.params.is64bit)
             idlen = sprintf(id,"__imp_%s",n);
         else
             idlen = sprintf(id,"_imp__%s@%u",n,cast(uint)type_paramsize(sym.Stype));
     }
     else
     {
-        idlen = sprintf(id,(config.exe == EX_WIN64) ? "__imp_%s" : "_imp__%s",n);
+        idlen = sprintf(id,(global.params.targetOS == TargetOS.Windows && global.params.is64bit) ? "__imp_%s" : "_imp__%s",n);
     }
     auto t = type_alloc(TYnptr | mTYconst);
     t.Tnext = sym.Stype;
@@ -543,6 +535,9 @@ Symbol *toThunkSymbol(FuncDeclaration fd, int offset)
     Symbol *s = toSymbol(fd);
     if (!offset)
         return s;
+
+    if (retStyle(fd.type.isTypeFunction(), fd.needThis()) == RET.stack)
+        s.Sfunc.Fflags3 |= F3hiddenPtr;
 
     __gshared int tmpnum;
     char[6 + tmpnum.sizeof * 3 + 1] name = void;

@@ -16,78 +16,62 @@ import core.stdc.stdio;
 import core.stdc.stdlib;
 import core.stdc.string;
 
-version = GC;
-
-version (GC)
-{
-    import core.memory : GC;
-
-    enum isGCAvailable = true;
-}
-else
-    enum isGCAvailable = false;
+import core.memory : GC;
 
 extern (C++) struct Mem
 {
     static char* xstrdup(const(char)* s) nothrow
     {
-        version (GC)
-            if (isGCEnabled)
-                return s ? s[0 .. strlen(s) + 1].dup.ptr : null;
+        if (isGCEnabled)
+            return s ? s[0 .. strlen(s) + 1].dup.ptr : null;
 
         return s ? cast(char*)check(.strdup(s)) : null;
     }
 
     static void xfree(void* p) pure nothrow
     {
-        version (GC)
-            if (isGCEnabled)
-                return GC.free(p);
+        if (isGCEnabled)
+            return GC.free(p);
 
         pureFree(p);
     }
 
     static void* xmalloc(size_t size) pure nothrow
     {
-        version (GC)
-            if (isGCEnabled)
-                return size ? GC.malloc(size) : null;
+        if (isGCEnabled)
+            return size ? GC.malloc(size) : null;
 
         return size ? check(pureMalloc(size)) : null;
     }
 
     static void* xmalloc_noscan(size_t size) pure nothrow
     {
-        version (GC)
-            if (isGCEnabled)
-                return size ? GC.malloc(size, GC.BlkAttr.NO_SCAN) : null;
+        if (isGCEnabled)
+            return size ? GC.malloc(size, GC.BlkAttr.NO_SCAN) : null;
 
         return size ? check(pureMalloc(size)) : null;
     }
 
     static void* xcalloc(size_t size, size_t n) pure nothrow
     {
-        version (GC)
-            if (isGCEnabled)
-                return size * n ? GC.calloc(size * n) : null;
+        if (isGCEnabled)
+            return size * n ? GC.calloc(size * n) : null;
 
         return (size && n) ? check(pureCalloc(size, n)) : null;
     }
 
     static void* xcalloc_noscan(size_t size, size_t n) pure nothrow
     {
-        version (GC)
-            if (isGCEnabled)
-                return size * n ? GC.calloc(size * n, GC.BlkAttr.NO_SCAN) : null;
+        if (isGCEnabled)
+            return size * n ? GC.calloc(size * n, GC.BlkAttr.NO_SCAN) : null;
 
         return (size && n) ? check(pureCalloc(size, n)) : null;
     }
 
     static void* xrealloc(void* p, size_t size) pure nothrow
     {
-        version (GC)
-            if (isGCEnabled)
-                return GC.realloc(p, size);
+        if (isGCEnabled)
+            return GC.realloc(p, size);
 
         if (!size)
         {
@@ -100,9 +84,8 @@ extern (C++) struct Mem
 
     static void* xrealloc_noscan(void* p, size_t size) pure nothrow
     {
-        version (GC)
-            if (isGCEnabled)
-                return GC.realloc(p, size, GC.BlkAttr.NO_SCAN);
+        if (isGCEnabled)
+            return GC.realloc(p, size, GC.BlkAttr.NO_SCAN);
 
         if (!size)
         {
@@ -132,34 +115,31 @@ extern (C++) struct Mem
         return p ? p : error();
     }
 
-    version (GC)
+    __gshared bool _isGCEnabled = true;
+
+    // fake purity by making global variable immutable (_isGCEnabled only modified before startup)
+    enum _pIsGCEnabled = cast(immutable bool*) &_isGCEnabled;
+
+    static bool isGCEnabled() pure nothrow @nogc @safe
     {
-        __gshared bool _isGCEnabled = true;
+        return *_pIsGCEnabled;
+    }
 
-        // fake purity by making global variable immutable (_isGCEnabled only modified before startup)
-        enum _pIsGCEnabled = cast(immutable bool*) &_isGCEnabled;
+    static void disableGC() nothrow @nogc
+    {
+        _isGCEnabled = false;
+    }
 
-        static bool isGCEnabled() pure nothrow @nogc @safe
-        {
-            return *_pIsGCEnabled;
-        }
+    static void addRange(const(void)* p, size_t size) nothrow @nogc
+    {
+        if (isGCEnabled)
+            GC.addRange(p, size);
+    }
 
-        static void disableGC() nothrow @nogc
-        {
-            _isGCEnabled = false;
-        }
-
-        static void addRange(const(void)* p, size_t size) nothrow @nogc
-        {
-            if (isGCEnabled)
-                GC.addRange(p, size);
-        }
-
-        static void removeRange(const(void)* p) nothrow @nogc
-        {
-            if (isGCEnabled)
-                GC.removeRange(p);
-        }
+    static void removeRange(const(void)* p) nothrow @nogc
+    {
+        if (isGCEnabled)
+            GC.removeRange(p);
     }
 }
 
@@ -197,9 +177,8 @@ extern (D) void* allocmemoryNoFree(size_t m_size) nothrow @nogc
 
 extern (D) void* allocmemory(size_t m_size) nothrow
 {
-    version (GC)
-        if (mem.isGCEnabled)
-            return GC.malloc(m_size);
+    if (mem.isGCEnabled)
+        return GC.malloc(m_size);
 
     return allocmemoryNoFree(m_size);
 }
@@ -238,35 +217,28 @@ static if (OVERRIDE_MEMALLOC)
         return allocmemory(m_size);
     }
 
-    version (GC)
+    private void* allocClass(const ClassInfo ci) nothrow pure
     {
-        private void* allocClass(const ClassInfo ci) nothrow pure
-        {
-            alias BlkAttr = GC.BlkAttr;
+        alias BlkAttr = GC.BlkAttr;
 
-            assert(!(ci.m_flags & TypeInfo_Class.ClassFlags.isCOMclass));
+        assert(!(ci.m_flags & TypeInfo_Class.ClassFlags.isCOMclass));
 
-            BlkAttr attr = BlkAttr.NONE;
-            if (ci.m_flags & TypeInfo_Class.ClassFlags.hasDtor
-                && !(ci.m_flags & TypeInfo_Class.ClassFlags.isCPPclass))
-                attr |= BlkAttr.FINALIZE;
-            if (ci.m_flags & TypeInfo_Class.ClassFlags.noPointers)
-                attr |= BlkAttr.NO_SCAN;
-            return GC.malloc(ci.initializer.length, attr, ci);
-        }
-
-        extern (C) void* _d_newitemU(const TypeInfo ti) nothrow;
+        BlkAttr attr = BlkAttr.NONE;
+        if (ci.m_flags & TypeInfo_Class.ClassFlags.hasDtor
+            && !(ci.m_flags & TypeInfo_Class.ClassFlags.isCPPclass))
+            attr |= BlkAttr.FINALIZE;
+        if (ci.m_flags & TypeInfo_Class.ClassFlags.noPointers)
+            attr |= BlkAttr.NO_SCAN;
+        return GC.malloc(ci.initializer.length, attr, ci);
     }
+
+    extern (C) void* _d_newitemU(const TypeInfo ti) nothrow;
 
     extern (C) Object _d_newclass(const ClassInfo ci) nothrow
     {
         const initializer = ci.initializer;
 
-        version (GC)
-            auto p = mem.isGCEnabled ? allocClass(ci) : allocmemoryNoFree(initializer.length);
-        else
-            auto p = allocmemoryNoFree(initializer.length);
-
+        auto p = mem.isGCEnabled ? allocClass(ci) : allocmemoryNoFree(initializer.length);
         memcpy(p, initializer.ptr, initializer.length);
         return cast(Object) p;
     }
@@ -275,9 +247,8 @@ static if (OVERRIDE_MEMALLOC)
     {
         extern (C) Object _d_allocclass(const ClassInfo ci) nothrow
         {
-            version (GC)
-                if (mem.isGCEnabled)
-                    return cast(Object) allocClass(ci);
+            if (mem.isGCEnabled)
+                return cast(Object) allocClass(ci);
 
             return cast(Object) allocmemoryNoFree(ci.initializer.length);
         }
@@ -285,22 +256,14 @@ static if (OVERRIDE_MEMALLOC)
 
     extern (C) void* _d_newitemT(TypeInfo ti) nothrow
     {
-        version (GC)
-            auto p = mem.isGCEnabled ? _d_newitemU(ti) : allocmemoryNoFree(ti.tsize);
-        else
-            auto p = allocmemoryNoFree(ti.tsize);
-
+        auto p = mem.isGCEnabled ? _d_newitemU(ti) : allocmemoryNoFree(ti.tsize);
         memset(p, 0, ti.tsize);
         return p;
     }
 
     extern (C) void* _d_newitemiT(TypeInfo ti) nothrow
     {
-        version (GC)
-            auto p = mem.isGCEnabled ? _d_newitemU(ti) : allocmemoryNoFree(ti.tsize);
-        else
-            auto p = allocmemoryNoFree(ti.tsize);
-
+        auto p = mem.isGCEnabled ? _d_newitemU(ti) : allocmemoryNoFree(ti.tsize);
         const initializer = ti.initializer;
         memcpy(p, initializer.ptr, initializer.length);
         return p;
@@ -409,97 +372,4 @@ pure nothrow unittest
     assert(s2 == [4, 1, 2]);
     string sEmpty;
     assert(sEmpty.arraydup is null);
-}
-
-// Define this to have Pool emit traces of objects allocated and disposed
-//debug = Pool;
-// Define this in addition to Pool to emit per-call traces (otherwise summaries are printed at the end).
-//debug = PoolVerbose;
-
-/**
-Defines a pool for class objects. Objects can be fetched from the pool with make() and returned to the pool with
-dispose(). Using a reference that has been dispose()d has undefined behavior. make() may return memory that has been
-previously dispose()d.
-
-Currently the pool has effect only if the GC is NOT used (i.e. either `version(GC)` or `mem.isGCEnabled` is false).
-Otherwise `make` just forwards to `new` and `dispose` does nothing.
-
-Internally the implementation uses a singly-linked freelist with a global root. The "next" pointer is stored in the
-first word of each disposed object.
-*/
-struct Pool(T)
-if (is(T == class))
-{
-    /// The freelist's root
-    private static T root;
-
-    private static void trace(string fun, string f, uint l)()
-    {
-        debug(Pool)
-        {
-            debug(PoolVerbose)
-            {
-                fprintf(stderr, "%.*s(%u): bytes: %lu Pool!(%.*s)."~fun~"()\n",
-                    cast(int) f.length, f.ptr, l, T.classinfo.initializer.length,
-                    cast(int) T.stringof.length, T.stringof.ptr);
-            }
-            else
-            {
-                static ulong calls;
-                if (calls == 0)
-                {
-                    // Plant summary printer
-                    static extern(C) void summarize()
-                    {
-                        fprintf(stderr, "%.*s(%u): bytes: %lu calls: %lu Pool!(%.*s)."~fun~"()\n",
-                            cast(int) f.length, f.ptr, l, ((T.classinfo.initializer.length + 15) & ~15) * calls,
-                            calls, cast(int) T.stringof.length, T.stringof.ptr);
-                    }
-                    atexit(&summarize);
-                }
-                ++calls;
-            }
-        }
-    }
-
-    /**
-    Returns a reference to a new object in the same state as if created with new T(args).
-    */
-    static T make(string f = __FILE__, uint l = __LINE__, A...)(auto ref A args)
-    {
-        if (!root)
-        {
-            trace!("makeNew", f, l)();
-            return new T(args);
-        }
-        else
-        {
-            trace!("makeReuse", f, l)();
-            auto result = root;
-            root = *(cast(T*) root);
-            memcpy(cast(void*) result, T.classinfo.initializer.ptr, T.classinfo.initializer.length);
-            result.__ctor(args);
-            return result;
-        }
-    }
-
-    /**
-    Signals to the pool that this object is no longer used, so it can recycle its memory.
-    */
-    static void dispose(string f = __FILE__, uint l = __LINE__, A...)(T goner)
-    {
-        version(GC)
-        {
-            if (mem.isGCEnabled) return;
-        }
-        trace!("dispose", f, l)();
-        debug
-        {
-            // Stomp the memory so as to maximize the chance of quick failure if used after dispose().
-            auto p = cast(ulong*) goner;
-            p[0 .. T.classinfo.initializer.length / ulong.sizeof] = 0xdeadbeef;
-        }
-        *(cast(T*) goner) = root;
-        root = goner;
-    }
 }

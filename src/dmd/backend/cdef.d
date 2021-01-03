@@ -284,28 +284,10 @@ enum
 enum REGMASK = 0xFFFF;
 
 // targ_llong is also used to store host pointers, so it should have at least their size
-version (SCPP)
-{
-    // No 64 bit support yet
-    alias targ_ptrdiff_t = targ_int;  // ptrdiff_t for target machine
-    alias targ_size_t = targ_uns;     // size_t for the target machine
-}
-else version (SPP)
-{
-    alias targ_ptrdiff_t = targ_int;  // ptrdiff_t for target machine
-    alias targ_size_t = targ_uns;     // size_t for the target machine
-}
-else version (HTOD)
-{
-    alias targ_ptrdiff_t = targ_int;  // ptrdiff_t for target machine
-    alias targ_size_t = targ_uns;     // size_t for the target machine
-}
-else
-{
-    // Support 64 bit targets
-    alias targ_ptrdiff_t = int64_t;  // ptrdiff_t for target machine
-    alias targ_size_t = uint64_t;    // size_t for the target machine
-}
+
+// 64 bit support
+alias targ_ptrdiff_t = int64_t;   // ptrdiff_t for target machine
+alias targ_size_t = uint64_t;     // size_t for the target machine
 
 /* Enable/disable various features
    (Some features may no longer work the old way when compiled out,
@@ -504,14 +486,10 @@ enum
     EX_RATIONAL     = 4,       // RATIONAL 286 program
     EX_PHARLAP      = 8,       // PHARLAP 386 program
     EX_COM          = 0x10,    // MSDOS .COM program
-//  EX_WIN16        = 0x20,    // Windows 3.x 16 bit program (no longer supported)
     EX_OS2          = 0x40,    // OS/2 2.0 32 bit program
     EX_OS1          = 0x80,    // OS/2 1.x 16 bit program
     EX_WIN32        = 0x100,
     EX_MZ           = 0x200,   // MSDOS real mode program
-    EX_XENIX        = 0x400,
-    EX_SCOUNIX      = 0x800,
-    EX_UNIXSVR4     = 0x1000,
     EX_LINUX        = 0x2000,
     EX_WIN64        = 0x4000,  // AMD64 and Windows (64 bit mode)
     EX_LINUX64      = 0x8000,  // AMD64 and Linux (64 bit mode)
@@ -526,17 +504,78 @@ enum
     EX_DRAGONFLYBSD64 = 0x1000000,
 }
 
+// All of them
+enum exefmt_t EX_all =
+    EX_DOSX      |
+    EX_ZPM       |
+    EX_RATIONAL  |
+    EX_PHARLAP   |
+    EX_COM       |
+    EX_OS2       |
+    EX_OS1       |
+    EX_WIN32     |
+    EX_MZ        |
+    EX_LINUX     |
+    EX_WIN64     |
+    EX_LINUX64   |
+    EX_OSX       |
+    EX_OSX64     |
+    EX_FREEBSD   |
+    EX_FREEBSD64 |
+    EX_SOLARIS   |
+    EX_SOLARIS64 |
+    EX_OPENBSD   |
+    EX_OPENBSD64 |
+    EX_DRAGONFLYBSD64;
+
+// All segmented memory models
+enum exefmt_t EX_segmented = EX_DOSX | EX_ZPM | EX_RATIONAL | EX_PHARLAP |
+                        EX_COM | EX_OS1 | EX_MZ;
 
 // All flat memory models (no segment registers)
-enum exefmt_t EX_flat = EX_OS2 | EX_WIN32 | EX_LINUX | EX_WIN64 | EX_LINUX64 |
-                         EX_OSX | EX_OSX64 | EX_FREEBSD | EX_FREEBSD64 |
-                         EX_OPENBSD | EX_OPENBSD64 |
-                         EX_DRAGONFLYBSD64 |
-                         EX_SOLARIS | EX_SOLARIS64;
+enum exefmt_t EX_flat = EX_OS2 | EX_WIN32 | EX_WIN64 | EX_posix;
 
 // All DOS executable types
 enum exefmt_t EX_dos =  EX_DOSX | EX_ZPM | EX_RATIONAL | EX_PHARLAP |
-                         EX_COM | EX_MZ /*| EX_WIN16*/;
+                         EX_COM | EX_MZ;
+
+// Windows and DOS executable types
+enum exefmt_t EX_windos = EX_dos | EX_OS1 | EX_OS2 | EX_WIN32 | EX_WIN64;
+
+// All POSIX systems
+enum exefmt_t EX_posix = EX_LINUX   | EX_LINUX64   |
+                         EX_OSX     | EX_OSX64     |
+                         EX_FREEBSD | EX_FREEBSD64 |
+                         EX_SOLARIS | EX_SOLARIS64 |
+                         EX_OPENBSD | EX_OPENBSD64 |
+                         EX_DRAGONFLYBSD64;
+
+// All 16 bit targets
+enum exefmt_t EX_16 = EX_ZPM | EX_RATIONAL | EX_COM | EX_OS1 | EX_MZ;
+
+// All 32 bit targets
+enum exefmt_t EX_32 = EX_DOSX | EX_OS2 | EX_PHARLAP |
+                EX_WIN32   |
+                EX_LINUX   |
+                EX_OSX     |
+                EX_FREEBSD |
+                EX_SOLARIS |
+                EX_OPENBSD;
+
+// All 64 bit targets
+enum exefmt_t EX_64 =
+                EX_WIN64     |
+                EX_LINUX64   |
+                EX_OSX64     |
+                EX_FREEBSD64 |
+                EX_SOLARIS64 |
+                EX_OPENBSD64 |
+                EX_DRAGONFLYBSD64;
+
+// Constraints
+static assert(EX_all == (EX_segmented ^ EX_flat));
+static assert(EX_all == (EX_16 ^ EX_32 ^ EX_64));
+static assert(EX_all == (EX_windos ^ EX_posix));
 
 alias config_flags_t = uint;
 enum
@@ -868,7 +907,7 @@ union eve
         {
             targ_size_t Voffset3;// offset from string
             char* Vstring;      // pointer to string (OPstring or OPasm)
-            targ_size_t Vstrlen;// length of string
+            size_t Vstrlen;     // length of string
         }
         struct
         {

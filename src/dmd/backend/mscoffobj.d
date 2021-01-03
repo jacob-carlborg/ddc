@@ -51,15 +51,11 @@ nothrow:
 alias _compare_fp_t = extern(C) nothrow int function(const void*, const void*);
 extern(C) void qsort(void* base, size_t nmemb, size_t size, _compare_fp_t compar);
 
-static if (TARGET_WINDOS)
-{
-
 extern (C) char* strupr(char*);
 
-private __gshared Outbuffer *fobjbuf;
+private extern (D) __gshared Outbuffer *fobjbuf;
 
 enum DEST_LEN = (IDMAX + IDOHD + 1);
-char *obj_mangle2(Symbol *s,char *dest);
 
 
 int elf_align(int size, int foffset);
@@ -98,10 +94,10 @@ IMAGE_SECTION_HEADER* ScnhdrTab() { return cast(IMAGE_SECTION_HEADER *)ScnhdrBuf
     segidx_t segidx_xdata = UNKNOWN;
     segidx_t segidx_pdata = UNKNOWN;
 
-    int jumpTableSeg;                // segment index for __jump_table
+    extern (D) int jumpTableSeg;     // segment index for __jump_table
 
-    Outbuffer *indirectsymbuf2;      // indirect symbol table of Symbol*'s
-    int pointersSeg;                 // segment index for __pointers
+    extern (D) Outbuffer *indirectsymbuf2;      // indirect symbol table of Symbol*'s
+    extern (D) int pointersSeg;      // segment index for __pointers
 
     Outbuffer *ptrref_buf;           // buffer for pointer references
 
@@ -111,7 +107,7 @@ IMAGE_SECTION_HEADER* ScnhdrTab() { return cast(IMAGE_SECTION_HEADER *)ScnhdrBuf
  * to be added last to the symbol table.
  * Obviously, there can be only one.
  */
-    IDXSTR extdef;
+    extern (D) IDXSTR extdef;
 
 // Each compiler segment is a section
 // Predefined compiler segments CODE,DATA,CDATA,UDATA map to indexes
@@ -122,7 +118,7 @@ IMAGE_SECTION_HEADER* ScnhdrTab() { return cast(IMAGE_SECTION_HEADER *)ScnhdrBuf
  * Returns !=0 if this segment is a code segment.
  */
 
-int seg_data_isCode(const ref seg_data sd)
+int mscoff_seg_data_isCode(const ref seg_data sd)
 {
     return (ScnhdrTab[sd.SDshtidx].Characteristics & IMAGE_SCN_CNT_CODE) != 0;
 }
@@ -132,8 +128,9 @@ public:
 // already in cgobj.c (should be part of objmod?):
 // seg_data **SegData;
 extern Rarray!(seg_data*) SegData;
-segidx_t seg_tlsseg = UNKNOWN;
-segidx_t seg_tlsseg_bss = UNKNOWN;
+
+private extern (D) segidx_t seg_tlsseg = UNKNOWN;
+private extern (D) segidx_t seg_tlsseg_bss = UNKNOWN;
 
 }
 
@@ -412,16 +409,19 @@ version (SCPP)
  * pseg/offset to start of seg.
  */
 
+private extern (D)
 int32_t *patchAddr(int seg, targ_size_t offset)
 {
     return cast(int32_t *)(fobjbuf.buf + ScnhdrTab[SegData[seg].SDshtidx].PointerToRawData + offset);
 }
 
+private extern (D)
 int32_t *patchAddr64(int seg, targ_size_t offset)
 {
     return cast(int32_t *)(fobjbuf.buf + ScnhdrTab[SegData[seg].SDshtidx].PointerToRawData + offset);
 }
 
+private extern (D)
 void patch(seg_data *pseg, targ_size_t offset, int seg, targ_size_t value)
 {
     //printf("patch(offset = x%04x, seg = %d, value = x%llx)\n", cast(uint)offset, seg, value);
@@ -1088,9 +1088,9 @@ void MsCoffObj_wkext(Symbol *s1,Symbol *s2)
  *      twice for the same file.
  */
 
-void obj_filename(const(char)* modname)
+void MsCoffObj_filename(const(char)* modname)
 {
-    //dbg_printf("obj_filename(char *%s)\n",modname);
+    //dbg_printf("MsCoffObj_filename(char *%s)\n",modname);
     // Not supported by mscoff
 }
 
@@ -1667,7 +1667,7 @@ static if (0) // NOT_DONE
 }
 }
 
-char *unsstr(uint value)
+private extern (D) char* unsstr(uint value)
 {
     __gshared char[64] buffer;
 
@@ -1681,6 +1681,7 @@ char *unsstr(uint value)
  *      mangled name
  */
 
+private extern (D)
 char *obj_mangle2(Symbol *s,char *dest)
 {
     size_t len;
@@ -1691,12 +1692,12 @@ char *obj_mangle2(Symbol *s,char *dest)
     assert(dest);
 
 version (SCPP)
-    name = CPP ? cpp_mangle(s) : s.Sident.ptr;
+    name = CPP ? cpp_mangle(s) : &s.Sident[0];
 else version (MARS)
     // C++ name mangling is handled by front end
-    name = s.Sident.ptr;
+    name = &s.Sident[0];
 else
-    name = s.Sident.ptr;
+    name = &s.Sident[0];
 
     len = strlen(name);                 // # of bytes in name
     //dbg_printf("len %d\n",len);
@@ -2120,7 +2121,7 @@ void MsCoffObj_addrel(segidx_t seg, targ_size_t offset, Symbol *targsym,
  */
 
 extern (C) {
-private int rel_fp(scope const(void*) e1, scope const(void*) e2)
+private int mscoff_rel_fp(scope const(void*) e1, scope const(void*) e2)
 {   Relocation *r1 = cast(Relocation *)e1;
     Relocation *r2 = cast(Relocation *)e2;
 
@@ -2128,9 +2129,9 @@ private int rel_fp(scope const(void*) e1, scope const(void*) e2)
 }
 }
 
-void mach_relsort(Outbuffer *buf)
+void mscoff_relsort(Outbuffer *buf)
 {
-    qsort(buf.buf, buf.length() / (Relocation).sizeof, (Relocation).sizeof, &rel_fp);
+    qsort(buf.buf, buf.length() / (Relocation).sizeof, (Relocation).sizeof, &mscoff_rel_fp);
 }
 
 /*******************************
@@ -2491,8 +2492,6 @@ extern (D) private void objflush_pointerRefs()
         objflush_pointerRef(s, soff);
     }
     ptrref_buf.reset();
-}
-
 }
 
 }

@@ -1269,11 +1269,16 @@ extern (C++) abstract class Expression : ASTNode
         if (v.storage_class & STC.manifest)
             return false; // ...or manifest constants
 
+        // accessing empty structs is pure
         if (v.type.ty == Tstruct)
         {
             StructDeclaration sd = (cast(TypeStruct)v.type).sym;
-            if (sd.hasNoFields)
-                return false;
+            if (sd.members) // not opaque
+            {
+                sd.determineSize(v.loc);
+                if (sd.hasNoFields)
+                    return false;
+            }
         }
 
         bool err = false;
@@ -1692,7 +1697,7 @@ extern (C++) abstract class Expression : ASTNode
         inout(TraitsExp)    isTraitsExp() { return op == TOK.traits ? cast(typeof(return))this : null; }
         inout(HaltExp)      isHaltExp() { return op == TOK.halt ? cast(typeof(return))this : null; }
         inout(IsExp)        isExp() { return op == TOK.is_ ? cast(typeof(return))this : null; }
-        inout(CompileExp)   isCompileExp() { return op == TOK.mixin_ ? cast(typeof(return))this : null; }
+        inout(MixinExp)     isMixinExp() { return op == TOK.mixin_ ? cast(typeof(return))this : null; }
         inout(ImportExp)    isImportExp() { return op == TOK.import_ ? cast(typeof(return))this : null; }
         inout(AssertExp)    isAssertExp() { return op == TOK.assert_ ? cast(typeof(return))this : null; }
         inout(DotIdExp)     isDotIdExp() { return op == TOK.dotIdentifier ? cast(typeof(return))this : null; }
@@ -3947,7 +3952,7 @@ extern (C++) final class FuncExp : Expression
             if (!tf.next && tof.next)
                 fd.treq = to;
 
-            auto ti = Pool!TemplateInstance.make(loc, td, tiargs);
+            auto ti = new TemplateInstance(loc, td, tiargs);
             Expression ex = (new ScopeExp(loc, ti)).expressionSemantic(td._scope);
 
             // Reset inference target for the later re-semantic
@@ -4614,19 +4619,19 @@ extern (C++) class BinAssignExp : BinExp
 /***********************************************************
  * https://dlang.org/spec/expression.html#mixin_expressions
  */
-extern (C++) final class CompileExp : Expression
+extern (C++) final class MixinExp : Expression
 {
     Expressions* exps;
 
     extern (D) this(const ref Loc loc, Expressions* exps)
     {
-        super(loc, TOK.mixin_, __traits(classInstanceSize, CompileExp));
+        super(loc, TOK.mixin_, __traits(classInstanceSize, MixinExp));
         this.exps = exps;
     }
 
     override Expression syntaxCopy()
     {
-        return new CompileExp(loc, arraySyntaxCopy(exps));
+        return new MixinExp(loc, arraySyntaxCopy(exps));
     }
 
     override bool equals(const RootObject o) const
@@ -4636,7 +4641,7 @@ extern (C++) final class CompileExp : Expression
         auto e = o.isExpression();
         if (!e)
             return false;
-        if (auto ce = e.isCompileExp())
+        if (auto ce = e.isMixinExp())
         {
             if (exps.dim != ce.exps.dim)
                 return false;
@@ -4813,12 +4818,17 @@ extern (C++) final class DotVarExp : UnaExp
 
     override bool isLvalue()
     {
-        return true;
+        if (e1.op != TOK.structLiteral)
+            return true;
+        auto vd = var.isVarDeclaration();
+        return !(vd && vd.isField());
     }
 
     override Expression toLvalue(Scope* sc, Expression e)
     {
         //printf("DotVarExp::toLvalue(%s)\n", toChars());
+        if (!isLvalue())
+            return Expression.toLvalue(sc, e);
         if (e1.op == TOK.this_ && sc.ctorflow.fieldinit.length && !(sc.ctorflow.callSuper & CSX.any_ctor))
         {
             if (VarDeclaration vd = var.isVarDeclaration())
@@ -4875,7 +4885,7 @@ extern (C++) final class DotTemplateInstanceExp : UnaExp
     {
         super(loc, TOK.dotTemplateInstance, __traits(classInstanceSize, DotTemplateInstanceExp), e);
         //printf("DotTemplateInstanceExp()\n");
-        this.ti = Pool!TemplateInstance.make(loc, name, tiargs);
+        this.ti = new TemplateInstance(loc, name, tiargs);
     }
 
     extern (D) this(const ref Loc loc, Expression e, TemplateInstance ti)
@@ -5342,6 +5352,22 @@ extern (C++) final class CastExp : UnaExp
         return to ? new CastExp(loc, e1.syntaxCopy(), to.syntaxCopy()) : new CastExp(loc, e1.syntaxCopy(), mod);
     }
 
+    override bool isLvalue()
+    {
+        //printf("e1.type = %s, to.type = %s\n", e1.type.toChars(), to.toChars());
+        if (!e1.isLvalue())
+            return false;
+        return (to.ty == Tsarray && (e1.type.ty == Tvector || e1.type.ty == Tsarray)) ||
+            e1.type.mutableOf().unSharedOf().equals(to.mutableOf().unSharedOf());
+    }
+
+    override Expression toLvalue(Scope* sc, Expression e)
+    {
+        if (isLvalue())
+            return this;
+        return Expression.toLvalue(sc, e);
+    }
+
     override Expression addDtorHook(Scope* sc)
     {
         if (to.toBasetype().ty == Tvoid)        // look past the cast(void)
@@ -5805,12 +5831,21 @@ extern (C++) final class IndexExp : BinExp
 
     override bool isLvalue()
     {
+        if (e1.op == TOK.assocArrayLiteral)
+            return false;
+        if (e1.type.ty == Tsarray ||
+            (e1.op == TOK.index && e1.type.ty != Tarray))
+        {
+            return e1.isLvalue();
+        }
         return true;
     }
 
     override Expression toLvalue(Scope* sc, Expression e)
     {
-        return this;
+        if (isLvalue())
+            return this;
+        return Expression.toLvalue(sc, e);
     }
 
     override Expression modifiableLvalue(Scope* sc, Expression e)
@@ -6866,7 +6901,7 @@ extern (C++) final class PrettyFuncInitExp : DefaultInitExp
         {
             const funcStr = fd.Dsymbol.toPrettyChars();
             OutBuffer buf;
-            functionToBufferWithIdent(fd.type.isTypeFunction(), &buf, funcStr);
+            functionToBufferWithIdent(fd.type.isTypeFunction(), &buf, funcStr, fd.isStatic);
             s = buf.extractChars();
         }
         else
