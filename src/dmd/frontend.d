@@ -14,6 +14,7 @@ import dmd.astcodegen : ASTCodegen;
 import dmd.dmodule : Module;
 import dmd.globals : CHECKENABLE, Loc, DiagnosticReporting, Param;
 import dmd.errors : DiagnosticHandler, diagnosticHandler, Classification;
+import dmd.target : Target;
 
 import std.range.primitives : isInputRange, ElementType;
 import std.traits : isNarrowString;
@@ -103,7 +104,8 @@ Params:
 void initDMD(
     DiagnosticHandler handler = null,
     const string[] versionIdentifiers = [],
-    ContractChecks contractChecks = ContractChecks()
+    ContractChecks contractChecks = ContractChecks(),
+    Target.Architecture architecture = Target.defaultArchitecture
 )
 {
     import dmd.globals : global;
@@ -111,10 +113,10 @@ void initDMD(
     diagnosticHandler = handler;
 
     global._init();
+    setTarget(global.params, architecture);
     setContractChecks(contractChecks, global.params);
-    setTarget(global.params);
-    setVersionIdentifiers(versionIdentifiers, global.params);
     initializeStaticData(global.params);
+    setVersionIdentifiers(versionIdentifiers, global.params);
 }
 
 void setContractChecks(ContractChecks contractChecks, ref Param params)
@@ -130,11 +132,14 @@ void setContractChecks(ContractChecks contractChecks, ref Param params)
     }
 }
 
-void setTarget(ref Param params)
+void setTarget(ref Param params, Target.Architecture architecture)
 {
-    import dmd.mars : setTarget;
+    import dmd.mars : setTarget, setTargetCPU;
+    import dmd.target : is64bit;
 
+    params.isLP64 = params.is64bit = architecture.is64bit;
     setTarget(params);
+    setTargetCPU(params);
 }
 
 void setVersionIdentifiers(const string[] versionIdentifiers, const ref Param params)

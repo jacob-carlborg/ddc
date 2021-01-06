@@ -79,6 +79,25 @@ extern (C++) struct Target
     /// Architecture name
     const(char)[] architectureName;
 
+    ///
+    enum Architecture
+    {
+        ///
+        x86,
+
+        ///
+        x86_64
+    }
+
+    version (X86_64)
+        /// The default architecture.
+        enum defaultArchitecture = Architecture.x86_64;
+    else version (X86)
+        /// The default architecture.
+        enum defaultArchitecture = Architecture.x86;
+    else
+        static assert(false, "Unknown architecture");
+
     /**
      * Values representing all properties for floating point types
      */
@@ -1140,3 +1159,14 @@ struct TargetObjC
 
 ////////////////////////////////////////////////////////////////////////////////
 extern (C++) __gshared Target target;
+
+
+/// Returns `true` if `architecture` is a 64 bit architecture.
+bool is64bit(Target.Architecture architecture)
+{
+    with (Target.Architecture) final switch (architecture)
+    {
+        case x86_64: return true;
+        case x86: return false;
+    }
+}

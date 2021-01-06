@@ -1405,7 +1405,7 @@ extern(C) void printGlobalConfigs(FILE* stream)
  *      params = parameters set by command line switch
  */
 
-private void setTargetCPU(ref Param params)
+package void setTargetCPU(ref Param params)
 {
     if (target.isXmmSupported())
     {
