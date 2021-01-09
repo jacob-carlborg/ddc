@@ -330,7 +330,7 @@ Parses a `dmd.conf` or `ldc2.conf` config file and returns defined import paths.
 
 Params:
     iniFile = iniFile to parse imports from
-    execDir = directory of the compiler binary
+    execDir = the path `@P`/`ldcbinarypath` will expand to
 
 Returns: forward range of import paths found in `iniFile`
 */
@@ -364,30 +364,44 @@ Finds a `dmd.conf` and parses it for import paths.
 This depends on the `$DMD` environment variable.
 If `$DMD` is set to `ldmd`, it will try to detect and parse a `ldc2.conf` instead.
 
+Params:
+    configFilename = the path to the config file. If this is `null` or empty,
+        it will automatically try to find the config file.
+
 Returns:
     A forward range of normalized import paths.
 
 See_Also: $(LREF determineDefaultCompiler), $(LREF parseImportPathsFromConfig)
 */
-auto findImportPaths()
+auto findImportPaths(string configFilename = null)
 {
-    import std.algorithm.searching : endsWith;
-    import std.file : exists;
     import std.path : dirName;
 
-    string execFilePath = determineDefaultCompiler();
-    assert(execFilePath !is null, "No D compiler found. `Use parseImportsFromConfig` manually.");
+    immutable compilerPath = determineDefaultCompiler;
 
-    immutable execDir = execFilePath.dirName;
+    if (configFilename.length == 0)
+        configFilename = findConfigFilename(compilerPath);
 
-    string iniFile;
-    if (execFilePath.endsWith("ldc"~exe, "ldc2"~exe, "ldmd"~exe, "ldmd2"~exe))
-        iniFile = findLDCConfig(execFilePath);
-    else
-        iniFile = findDMDConfig(execFilePath);
+    return configFilename.parseImportPathsFromConfig(configFilename.dirName);
+}
 
-    assert(iniFile !is null && iniFile.exists, "No valid config found.");
-    return iniFile.parseImportPathsFromConfig(execDir);
+string findConfigFilename(string compilerPath = determineDefaultCompiler)
+in
+{
+    assert(compilerPath !is null, "No D compiler found. `Use parseImportsFromConfig` manually.");
+}
+out(result)
+{
+    import std.file : exists;
+    assert(result !is null && result.exists, "No valid config found.");
+}
+do
+{
+    import std.algorithm.searching : endsWith;
+
+    immutable isLDC = compilerPath.endsWith("ldc"~exe, "ldc2"~exe, "ldmd"~exe, "ldmd2"~exe);
+
+    return isLDC ? findLDCConfig(compilerPath) : findDMDConfig(compilerPath);
 }
 
 /**
