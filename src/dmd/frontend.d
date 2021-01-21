@@ -257,6 +257,31 @@ Returns: full path to the found `dmd.conf`, `null` otherwise.
 */
 string findDMDConfig(const(char)[] dmdFilePath)
 {
+    string findSnapConfig(string configPath)
+    {
+        import std.algorithm : filter, findSplitAfter, map, startsWith;
+        import std.process : execute;
+        import std.string : lineSplitter;
+
+        if (!dmdFilePath.startsWith("/snap"))
+            return configPath;
+
+        enum prefix = "Config file: ";
+
+        auto result = execute([dmdFilePath, "-v"])
+            .output
+            .lineSplitter
+            .filter!(line => line.startsWith(prefix))
+            .map!(line => line.findSplitAfter(prefix)[1]);
+
+        return result.empty ? configPath : result.front;
+    }
+
+    import std.algorithm : filter, findSplitAfter, startsWith;
+    import std.file : exists;
+    import std.process : execute;
+    import std.string : lineSplitter;
+
     import dmd.dinifile : findConfFile;
 
     version (Windows)
@@ -264,7 +289,9 @@ string findDMDConfig(const(char)[] dmdFilePath)
     else
         enum configFile = "dmd.conf";
 
-    return findConfFile(dmdFilePath, configFile).idup;
+    const configPath = findConfFile(dmdFilePath, configFile).idup;
+
+    return configPath.exists ? configPath : findSnapConfig(configPath);
 }
 
 /**
@@ -277,6 +304,28 @@ Returns: full path to the found `ldc2.conf`, `null` otherwise.
 */
 string findLDCConfig(const(char)[] ldcFilePath)
 {
+    string findSnapConfig()
+    {
+        import std.algorithm : filter, findSplitAfter, findSplitBefore, map, startsWith;
+        import std.process : execute;
+        import std.string : lineSplitter, strip;
+
+        if (!ldcFilePath.startsWith("/snap"))
+            return null;
+
+        enum prefix = "config";
+
+        auto result = execute([ldcFilePath, "-v"])
+            .output
+            .lineSplitter
+            .filter!(line => line.startsWith(prefix))
+            .map!(line => line.findSplitAfter(prefix)[1])
+            .map!(line => line.findSplitBefore("(")[0])
+            .map!(line => line.strip);
+
+        return result.empty ? null : result.front;
+    }
+
     import std.file : getcwd;
     import std.path : buildPath, dirName;
     import std.algorithm.iteration : filter;
@@ -284,7 +333,7 @@ string findLDCConfig(const(char)[] ldcFilePath)
 
     auto execDir = ldcFilePath.dirName;
 
-    immutable ldcConfig = "ldc2.conf";
+    enum ldcConfig = "ldc2.conf";
     // https://wiki.dlang.org/Using_LDC
     auto ldcConfigs = [
         getcwd.buildPath(ldcConfig),
@@ -296,10 +345,8 @@ string findLDCConfig(const(char)[] ldcFilePath)
         "/etc".buildPath(ldcConfig),
         "/etc/ldc".buildPath(ldcConfig),
     ].filter!exists;
-    if (ldcConfigs.empty)
-        return null;
 
-    return ldcConfigs.front;
+    return ldcConfigs.empty ? findSnapConfig() : ldcConfigs.front;
 }
 
 /**
