@@ -1,5 +1,5 @@
 /*
-REQUIRED_ARGS: -mcpu=native -preview=intpromote -preview=intpromote
+REQUIRED_ARGS: -mcpu=native -preview=intpromote
 PERMUTE_ARGS: -O -inline -release
 */
 
@@ -1008,25 +1008,6 @@ void testshrshl()
 
 ////////////////////////////////////////////////////////////////////////
 
-struct S1
-{
-    cdouble val;
-}
-
-void formatTest(S1 s, double re, double im)
-{
-    assert(s.val.re == re);
-    assert(s.val.im == im);
-}
-
-void test10639()
-{
-    S1 s = S1(3+2.25i);
-    formatTest(s, 3, 2.25);
-}
-
-////////////////////////////////////////////////////////////////////////
-
 bool bt10715(in uint[] ary, size_t bitnum)
 {
     return !!(ary[bitnum >> 5] & 1 << (bitnum & 31)); // uses bt
@@ -1328,18 +1309,6 @@ void test14829()
         assert(0);
 }
 
-
-////////////////////////////////////////////////////////////////////////
-
-void test2()
-{
-    void test(cdouble v)
-    {
-            auto x2 = cdouble(v);
-            assert(x2 == v);
-    }
-    test(1.2+3.4i);
-}
 
 ////////////////////////////////////////////////////////////////////////
 
@@ -2369,6 +2338,61 @@ void test11435b()
     abc(px[0..2]);
 }
 
+////////////////////////////////////////////////////////////////////////
+// https://issues.dlang.org/show_bug.cgi?id=21513
+
+struct Stuff
+{
+    size_t c;         // declare after items and not crash !
+    ubyte[1] items;
+}
+
+void grow(ref Stuff stuff)
+{
+    with (stuff)
+    {
+        const oldCapacity = c;
+        items.ptr[0..oldCapacity] = items.ptr[0..0]; // use literal 0 instead of
+        items.ptr[0] = 0;                            // oldcapacity and no crash !
+    }
+}
+
+void test21513()
+{
+    Stuff stuff;
+    grow(stuff);
+}
+
+////////////////////////////////////////////////////////////////////////
+// https://issues.dlang.org/show_bug.cgi?id=21526
+
+double f21256(double a, double b) {
+    double c = a + b;
+    return c;
+}
+
+void test21256()
+{
+    union DX
+    {
+        double d;
+        ulong l;
+    }
+
+    DX a, b;
+    a.l = 0x4341c37937e08000;
+    b.l = 0x4007ffcb923a29c7;
+
+    DX r;
+    r.d = f21256(a.d, b.d);
+    //if (r.d != 0x1.1c37937e08001p+53)
+        //printf("r = %A should be 0x1.1c37937e08001p+53 %A\n", r.d, 0x1.1c37937e08001p+53);
+    //assert(r == 0x1.1c37937e08001p+53);
+
+    // cannot seem to get the two to produce the same value
+    assert(r.l == 0x4341c37937e08001 || // value using XMM
+           r.l == 0x4341c37937e08002);  // value using x87
+}
 
 ////////////////////////////////////////////////////////////////////////
 
@@ -2411,7 +2435,6 @@ int main()
     test13190();
     test13485();
     test14436();
-    test10639();
     test10715();
     test10678();
     test7565();
@@ -2423,7 +2446,6 @@ int main()
     test13784();
     test14220();
     test14829();
-    test2();
     test3();
     test14782();
     test14987();
@@ -2466,6 +2488,8 @@ int main()
     test16268();
     test11435a();
     test11435b();
+    test21513();
+    test21256();
 
     printf("Success\n");
     return 0;

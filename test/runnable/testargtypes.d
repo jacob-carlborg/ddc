@@ -1,8 +1,5 @@
 /*
 DISABLED: win32 win64 osx32 linux32 freebsd32
-TEST_OUTPUT:
----
----
 */
 
 void chkArgTypes(S, V...)()
@@ -127,9 +124,6 @@ int main()
 
     struct S12 { align(16) int a; }
     chkArgTypes!(S12, long)();
-
-    struct S13 { short a; cfloat b; }
-    chkArgTypes!(S13, long, float)();
 
     struct S13957 { double a; ulong b; }
     chkArgTypes!(S13957, double, long)();

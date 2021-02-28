@@ -3,7 +3,7 @@
  *
  * Specification: $(LINK2 https://dlang.org/spec/grammar.html, D Grammar)
  *
- * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2021 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/parse.d, _parse.d)
@@ -203,7 +203,7 @@ private struct PrefixAttributes(AST)
     StorageClass storageClass;
     AST.Expression depmsg;
     LINK link;
-    AST.Prot protection;
+    AST.Visibility visibility;
     bool setAlignment;
     AST.Expression ealign;
     AST.Expressions* udas;
@@ -286,6 +286,7 @@ final class Parser(AST) : Lexer
     {
         AST.Module mod;
         LINK linkage;
+        Loc linkLoc;
         CPPMANGLE cppmangle;
         Loc endloc; // set to location of last right curly
         int inBrackets; // inside [] of array index or slice
@@ -419,14 +420,12 @@ final class Parser(AST) : Lexer
                 goto Lerr;
             }
 
-            AST.Identifiers* a = null;
+            Identifier[] a;
             Identifier id = token.ident;
 
             while (nextToken() == TOK.dot)
             {
-                if (!a)
-                    a = new AST.Identifiers();
-                a.push(id);
+                a ~= id;
                 nextToken();
                 if (token.value != TOK.identifier)
                 {
@@ -510,7 +509,7 @@ final class Parser(AST) : Lexer
                 pAttrs = &attrs;
                 pAttrs.comment = token.blockComment.ptr;
             }
-            AST.Prot.Kind prot;
+            AST.Visibility.Kind prot;
             StorageClass stc;
             AST.Condition condition;
 
@@ -864,7 +863,7 @@ final class Parser(AST) : Lexer
                 Token* tk;
                 if (token.value == TOK.identifier && skipParens(peek(&token), &tk) && skipAttributes(tk, &tk) &&
                     (tk.value == TOK.leftParentheses || tk.value == TOK.leftCurly || tk.value == TOK.in_ ||
-                     tk.value == TOK.out_ || tk.value == TOK.do_ ||
+                     tk.value == TOK.out_ || tk.value == TOK.do_ || tk.value == TOK.goesTo ||
                      tk.value == TOK.identifier && tk.ident == Id._body))
                 {
                     version (none)
@@ -968,6 +967,7 @@ final class Parser(AST) : Lexer
                     }
                     pAttrs.link = link;
                     this.linkage = link;
+                    this.linkLoc = linkLoc;
                     a = parseBlock(pLastDecl, pAttrs);
                     if (idents)
                     {
@@ -982,7 +982,7 @@ final class Parser(AST) : Lexer
                                 a.push(s);
                             }
                             if (cppMangleOnly)
-                                s = new AST.CPPNamespaceDeclaration(id, a);
+                                s = new AST.CPPNamespaceDeclaration(linkLoc, id, a);
                             else
                                 s = new AST.Nspace(linkLoc, id, null, a);
                         }
@@ -1001,7 +1001,7 @@ final class Parser(AST) : Lexer
                                 a.push(s);
                             }
                             if (cppMangleOnly)
-                                s = new AST.CPPNamespaceDeclaration(exp, a);
+                                s = new AST.CPPNamespaceDeclaration(linkLoc, exp, a);
                             else
                                 s = new AST.Nspace(linkLoc, null, exp, a);
                         }
@@ -1010,52 +1010,52 @@ final class Parser(AST) : Lexer
                     else if (cppmangle != CPPMANGLE.def)
                     {
                         assert(link == LINK.cpp);
-                        s = new AST.CPPMangleDeclaration(cppmangle, a);
+                        s = new AST.CPPMangleDeclaration(linkLoc, cppmangle, a);
                     }
                     else if (pAttrs.link != LINK.default_)
                     {
-                        s = new AST.LinkDeclaration(pAttrs.link, a);
+                        s = new AST.LinkDeclaration(linkLoc, pAttrs.link, a);
                         pAttrs.link = LINK.default_;
                     }
                     break;
                 }
 
             case TOK.private_:
-                prot = AST.Prot.Kind.private_;
+                prot = AST.Visibility.Kind.private_;
                 goto Lprot;
 
             case TOK.package_:
-                prot = AST.Prot.Kind.package_;
+                prot = AST.Visibility.Kind.package_;
                 goto Lprot;
 
             case TOK.protected_:
-                prot = AST.Prot.Kind.protected_;
+                prot = AST.Visibility.Kind.protected_;
                 goto Lprot;
 
             case TOK.public_:
-                prot = AST.Prot.Kind.public_;
+                prot = AST.Visibility.Kind.public_;
                 goto Lprot;
 
             case TOK.export_:
-                prot = AST.Prot.Kind.export_;
+                prot = AST.Visibility.Kind.export_;
                 goto Lprot;
             Lprot:
                 {
-                    if (pAttrs.protection.kind != AST.Prot.Kind.undefined)
+                    if (pAttrs.visibility.kind != AST.Visibility.Kind.undefined)
                     {
-                        if (pAttrs.protection.kind != prot)
-                            error("conflicting protection attribute `%s` and `%s`", AST.protectionToChars(pAttrs.protection.kind), AST.protectionToChars(prot));
+                        if (pAttrs.visibility.kind != prot)
+                            error("conflicting visibility attribute `%s` and `%s`", AST.visibilityToChars(pAttrs.visibility.kind), AST.visibilityToChars(prot));
                         else
-                            error("redundant protection attribute `%s`", AST.protectionToChars(prot));
+                            error("redundant visibility attribute `%s`", AST.visibilityToChars(prot));
                     }
-                    pAttrs.protection.kind = prot;
+                    pAttrs.visibility.kind = prot;
 
                     nextToken();
 
                     // optional qualified package identifier to bind
-                    // protection to
-                    AST.Identifiers* pkg_prot_idents = null;
-                    if (pAttrs.protection.kind == AST.Prot.Kind.package_ && token.value == TOK.leftParentheses)
+                    // visibility to
+                    Identifier[] pkg_prot_idents;
+                    if (pAttrs.visibility.kind == AST.Visibility.Kind.package_ && token.value == TOK.leftParentheses)
                     {
                         pkg_prot_idents = parseQualifiedIdentifier("protection package");
                         if (pkg_prot_idents)
@@ -1071,14 +1071,14 @@ final class Parser(AST) : Lexer
 
                     const attrloc = token.loc;
                     a = parseBlock(pLastDecl, pAttrs);
-                    if (pAttrs.protection.kind != AST.Prot.Kind.undefined)
+                    if (pAttrs.visibility.kind != AST.Visibility.Kind.undefined)
                     {
-                        if (pAttrs.protection.kind == AST.Prot.Kind.package_ && pkg_prot_idents)
-                            s = new AST.ProtDeclaration(attrloc, pkg_prot_idents, a);
+                        if (pAttrs.visibility.kind == AST.Visibility.Kind.package_ && pkg_prot_idents)
+                            s = new AST.VisibilityDeclaration(attrloc, pkg_prot_idents, a);
                         else
-                            s = new AST.ProtDeclaration(attrloc, pAttrs.protection, a);
+                            s = new AST.VisibilityDeclaration(attrloc, pAttrs.visibility, a);
 
-                        pAttrs.protection = AST.Prot(AST.Prot.Kind.undefined);
+                        pAttrs.visibility = AST.Visibility(AST.Visibility.Kind.undefined);
                     }
                     break;
                 }
@@ -1321,7 +1321,7 @@ final class Parser(AST) : Lexer
     }
 
     /********************************************
-     * Parse declarations after an align, protection, or extern decl.
+     * Parse declarations after an align, visibility, or extern decl.
      */
     private AST.Dsymbols* parseBlock(AST.Dsymbol* pLastDecl, PrefixAttributes!AST* pAttrs = null)
     {
@@ -1680,7 +1680,6 @@ final class Parser(AST) : Lexer
         // Get array of TemplateParameters
         if (flag || token.value != TOK.rightParentheses)
         {
-            int isvariadic = 0;
             while (token.value != TOK.rightParentheses)
             {
                 AST.TemplateParameter tp;
@@ -1762,9 +1761,6 @@ final class Parser(AST) : Lexer
                 else if (token.value == TOK.identifier && tv == TOK.dotDotDot)
                 {
                     // ident...
-                    if (isvariadic)
-                        error("variadic template parameter must be last");
-                    isvariadic = 1;
                     loc = token.loc;
                     tp_ident = token.ident;
                     nextToken();
@@ -2353,9 +2349,9 @@ final class Parser(AST) : Lexer
      * Returns:
      *     array of identifiers with actual qualified one stored last
      */
-    private AST.Identifiers* parseQualifiedIdentifier(const(char)* entity)
+    private Identifier[] parseQualifiedIdentifier(const(char)* entity)
     {
-        AST.Identifiers* qualified = null;
+        Identifier[] qualified;
 
         do
         {
@@ -2363,13 +2359,11 @@ final class Parser(AST) : Lexer
             if (token.value != TOK.identifier)
             {
                 error("`%s` expected as dot-separated identifiers, got `%s`", entity, token.toChars());
-                return null;
+                return qualified;
             }
 
             Identifier id = token.ident;
-            if (!qualified)
-                qualified = new AST.Identifiers();
-            qualified.push(id);
+            qualified ~= id;
 
             nextToken();
         }
@@ -3500,7 +3494,7 @@ final class Parser(AST) : Lexer
 
             const loc = token.loc;
             Identifier id = token.ident;
-            AST.Identifiers* a = null;
+            Identifier[] a;
             nextToken();
             if (!aliasid && token.value == TOK.assign)
             {
@@ -3509,9 +3503,7 @@ final class Parser(AST) : Lexer
             }
             while (token.value == TOK.dot)
             {
-                if (!a)
-                    a = new AST.Identifiers();
-                a.push(id);
+                a ~= id;
                 nextToken();
                 if (token.value != TOK.identifier)
                 {
@@ -4278,10 +4270,13 @@ final class Parser(AST) : Lexer
     }
 
     private void parseStorageClasses(ref StorageClass storage_class, ref LINK link,
-        ref bool setAlignment, ref AST.Expression ealign, ref AST.Expressions* udas)
+        ref bool setAlignment, ref AST.Expression ealign, ref AST.Expressions* udas,
+        out Loc linkloc)
     {
         StorageClass stc;
         bool sawLinkage = false; // seen a linkage declaration
+
+        linkloc = Loc.initial;
 
         while (1)
         {
@@ -4401,6 +4396,7 @@ final class Parser(AST) : Lexer
                     AST.Expressions* identExps = null;
                     CPPMANGLE cppmangle;
                     bool cppMangleOnly = false;
+                    linkloc = token.loc;
                     link = parseLinkage(&idents, &identExps, cppmangle, cppMangleOnly);
                     if (idents || identExps)
                     {
@@ -4443,6 +4439,7 @@ final class Parser(AST) : Lexer
         StorageClass storage_class = STC.undefined_;
         TOK tok = TOK.reserved;
         LINK link = linkage;
+        Loc linkloc = this.linkLoc;
         bool setAlignment = false;
         AST.Expression ealign;
         AST.Expressions* udas = null;
@@ -4461,7 +4458,7 @@ final class Parser(AST) : Lexer
             nextToken();
             nextToken();        // advance past =
             auto t = parseType();
-            AST.Dsymbol s = new AST.AliasAssign(loc, ident, t);
+            AST.Dsymbol s = new AST.AliasAssign(loc, ident, t, null);
             check(TOK.semicolon);
             addComment(s, comment);
             auto a = new AST.Dsymbols();
@@ -4532,9 +4529,10 @@ final class Parser(AST) : Lexer
                         udas = null;
                         storage_class = STC.undefined_;
                         link = linkage;
+                        linkloc = this.linkLoc;
                         setAlignment = false;
                         ealign = null;
-                        parseStorageClasses(storage_class, link, setAlignment, ealign, udas);
+                        parseStorageClasses(storage_class, link, setAlignment, ealign, udas, linkloc);
                     }
 
                     if (token.value == TOK.at)
@@ -4652,7 +4650,7 @@ final class Parser(AST) : Lexer
                     {
                         auto a2 = new AST.Dsymbols();
                         a2.push(s);
-                        s = new AST.LinkDeclaration(link, a2);
+                        s = new AST.LinkDeclaration(linkloc, link, a2);
                     }
                     a.push(s);
 
@@ -4695,7 +4693,7 @@ final class Parser(AST) : Lexer
 
         if (!autodecl)
         {
-            parseStorageClasses(storage_class, link, setAlignment, ealign, udas);
+            parseStorageClasses(storage_class, link, setAlignment, ealign, udas, linkloc);
 
             if (token.value == TOK.enum_)
             {
@@ -4736,7 +4734,7 @@ final class Parser(AST) : Lexer
                 }
                 if (link != linkage)
                 {
-                    s = new AST.LinkDeclaration(link, a);
+                    s = new AST.LinkDeclaration(linkloc, link, a);
                     a = new AST.Dsymbols();
                     a.push(s);
                 }
@@ -4773,7 +4771,7 @@ final class Parser(AST) : Lexer
                 Token* tk;
                 if ((storage_class || udas) && token.value == TOK.identifier && skipParens(peek(&token), &tk) &&
                     skipAttributes(tk, &tk) &&
-                    (tk.value == TOK.leftParentheses || tk.value == TOK.leftCurly || tk.value == TOK.in_ || tk.value == TOK.out_ ||
+                    (tk.value == TOK.leftParentheses || tk.value == TOK.leftCurly || tk.value == TOK.in_ || tk.value == TOK.out_ || tk.value == TOK.goesTo ||
                      tk.value == TOK.do_ || tk.value == TOK.identifier && tk.ident == Id._body))
                 {
                     version (none)
@@ -4872,7 +4870,7 @@ final class Parser(AST) : Lexer
                 {
                     auto ax = new AST.Dsymbols();
                     ax.push(v);
-                    s = new AST.LinkDeclaration(link, ax);
+                    s = new AST.LinkDeclaration(linkloc, link, ax);
                 }
                 a.push(s);
                 switch (token.value)
@@ -4908,7 +4906,7 @@ final class Parser(AST) : Lexer
                 {
                     auto ax = new AST.Dsymbols();
                     ax.push(s);
-                    s = new AST.LinkDeclaration(link, ax);
+                    s = new AST.LinkDeclaration(linkloc, link, ax);
                 }
                 if (udas)
                 {
@@ -4972,7 +4970,7 @@ final class Parser(AST) : Lexer
                 {
                     auto ax = new AST.Dsymbols();
                     ax.push(s);
-                    s = new AST.LinkDeclaration(link, ax);
+                    s = new AST.LinkDeclaration(linkloc, link, ax);
                 }
                 if (udas)
                 {
@@ -5139,6 +5137,18 @@ final class Parser(AST) : Lexer
     L1:
         switch (token.value)
         {
+        case TOK.goesTo:
+            if (requireDo)
+                error("missing `do { ... }` after `in` or `out`");
+            if (!global.params.shortenedMethods)
+                error("=> shortened method not enabled, compile with compiler switch `-preview=shortenedMethods`");
+            const returnloc = token.loc;
+            nextToken();
+            f.fbody = new AST.ReturnStatement(returnloc, parseExpression());
+            f.endloc = token.loc;
+            check(TOK.semicolon);
+            break;
+
         case TOK.leftCurly:
             if (requireDo)
                 error("missing `do { ... }` after `in` or `out`");
